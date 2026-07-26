@@ -47,7 +47,7 @@ class Instrument(models.Model):
         """Connection states shown in the instrument inventory."""
 
         OFFLINE = "offline", "Offline"
-        ONLINE = "online", "Online"
+        REACHABLE = "reachable", "Reachable"
         ERROR = "error", "Error"
 
     name = models.CharField(max_length=100)
@@ -65,6 +65,9 @@ class Instrument(models.Model):
         default=Status.OFFLINE,
     )
     description = models.TextField(blank=True)
+    last_identification = models.TextField(blank=True)
+    last_driver_test_at = models.DateTimeField(null=True, blank=True)
+    last_driver_error = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -81,7 +84,34 @@ class Instrument(models.Model):
     def status_badge(self):
         """Return the Bootstrap badge colour for the current status."""
         return {
-            self.Status.ONLINE: "success",
+            self.Status.REACHABLE: "success",
             self.Status.OFFLINE: "secondary",
             self.Status.ERROR: "danger",
         }.get(self.status, "secondary")
+
+
+class Measurement(models.Model):
+    """Store one normalized reading returned by an instrument driver."""
+
+    instrument = models.ForeignKey(
+        Instrument,
+        on_delete=models.PROTECT,
+        related_name="measurements",
+    )
+    parameter = models.CharField(max_length=50)
+    value = models.FloatField()
+    unit = models.CharField(max_length=20)
+    timestamp = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        """Show the newest measurements first."""
+
+        ordering = ("-timestamp",)
+
+    def __str__(self):
+        """Return a readable measurement summary."""
+        return (
+            f"{self.instrument.name}: {self.parameter} = "
+            f"{self.value} {self.unit}"
+        )

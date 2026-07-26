@@ -1,0 +1,52 @@
+{% extends "main/base.html" %}
+
+{% block title %}
+Measurements
+{% endblock %}
+
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1">Measurements</h2>
+        <div class="text-muted">
+            {{ measurement_count }} measurement{{ measurement_count|pluralize }}
+        </div>
+    </div>
+    <a class="btn btn-outline-secondary" href="{% url 'dashboard' %}">
+        Back
+    </a>
+</div>
+
+<div class="table-responsive">
+    <table class="table table-striped table-hover align-middle">
+        <thead>
+            <tr>
+                <th scope="col">Time</th>
+                <th scope="col">Instrument</th>
+                <th scope="col">Parameter</th>
+                <th scope="col" class="text-end">Value</th>
+                <th scope="col">Unit</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for measurement in measurements %}
+                <tr>
+                    <td>{{ measurement.timestamp }}</td>
+                    <td>{{ measurement.instrument.name }}</td>
+                    <td>{{ measurement.parameter }}</td>
+                    <td class="text-end">{{ measurement.value }}</td>
+                    <td>{{ measurement.unit }}</td>
+                </tr>
+            {% empty %}
+                <tr>
+                    <td colspan="5" class="text-center text-muted py-4">
+                        No measurements have been recorded yet.
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}

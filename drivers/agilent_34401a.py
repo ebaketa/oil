@@ -49,7 +49,7 @@ class Agilent34401ADriver(BaseInstrumentDriver):
         )
 
     def connect(self) -> None:
-        """Open the serial port and configure DC voltage measurement."""
+        """Open the serial port without changing instrument settings."""
         if self.connected:
             return
 
@@ -66,25 +66,14 @@ class Agilent34401ADriver(BaseInstrumentDriver):
             )
             self.serial_connection.reset_input_buffer()
             self.connected = True
-            for command, delay in (
-                ("SYST:REM", 0.5),
-                ("DISP OFF", 0.5),
-                ("*CLS", 0.5),
-                (f"CONF:VOLT:DC {self.voltage_range}", 0.1),
-                (f"VOLT:DC:NPLC {self.nplc}", 0.1),
-            ):
-                self.write(command)
-                time.sleep(delay)
         except (OSError, serial.SerialException, CommunicationError) as exc:
             self._close_connection()
             raise ConnectionError("Could not initialize the Agilent 34401A.") from exc
 
     def disconnect(self) -> None:
-        """Restore the display and local control, then close the serial port."""
+        """Return local control and close the serial port."""
         try:
             if self.serial_connection is not None:
-                self.write("DISP ON")
-                time.sleep(0.5)
                 self.write("SYST:LOC")
         except CommunicationError:
             pass
@@ -131,9 +120,34 @@ class Agilent34401ADriver(BaseInstrumentDriver):
         """Return the instrument identity response."""
         return self.query("*IDN?")
 
+    def execute(self, command: str) -> None:
+        """Execute a command using 34401A serial error-queue confirmation.
+
+        The 34401A connected over RS-232 can leave ``*OPC?`` waiting after a
+        configuration command. Its setting queries provide the authoritative
+        completion check, while this method verifies that the command did not
+        add a SCPI error.
+        """
+        self.write(command)
+        time.sleep(0.5)
+
+        error = self.query("SYST:ERR?").strip()
+        error_code = error.split(",", maxsplit=1)[0].strip()
+        try:
+            command_succeeded = int(error_code) == 0
+        except ValueError:
+            command_succeeded = False
+
+        if not command_succeeded:
+            raise CommunicationError(
+                f"The instrument rejected command {command!r}: {error}"
+            )
+
     def measure_dc_voltage(self) -> MeasurementResult:
         """Measure DC voltage and return a normalized numeric result."""
         try:
+            self.write(f"CONF:VOLT:DC {self.voltage_range}")
+            self.write(f"VOLT:DC:NPLC {self.nplc}")
             value = float(self.query("READ?"))
         except (ValueError, CommunicationError) as exc:
             raise MeasurementError(

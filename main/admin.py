@@ -2,7 +2,7 @@
 
 from django.contrib import admin
 
-from .models import Instrument, UserPreference
+from .models import Instrument, Measurement, UserPreference
 
 
 @admin.register(UserPreference)
@@ -21,5 +21,15 @@ class InstrumentAdmin(admin.ModelAdmin):
     list_display = ("name", "manufacturer", "model_name", "driver", "status")
     list_filter = ("driver", "status", "manufacturer")
     search_fields = ("name", "manufacturer", "model_name", "serial_number")
+
+
+@admin.register(Measurement)
+class MeasurementAdmin(admin.ModelAdmin):
+    """Display captured measurements in Django admin."""
+
+    list_display = ("instrument", "parameter", "value", "unit", "timestamp")
+    list_filter = ("parameter", "unit", "timestamp")
+    search_fields = ("instrument__name", "parameter", "notes")
+    ordering = ("-timestamp",)
 
 # Register your models here.

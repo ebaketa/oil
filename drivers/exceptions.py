@@ -15,3 +15,7 @@ class CommunicationError(DriverError):
 
 class MeasurementError(DriverError):
     """An instrument did not return a valid measurement."""
+
+
+class ConfigurationError(DriverError):
+    """An instrument did not enter the requested configuration."""

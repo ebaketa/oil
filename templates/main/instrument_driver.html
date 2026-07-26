@@ -1,0 +1,95 @@
+{% extends "main/base.html" %}
+
+{% block title %}
+Driver | {{ instrument.name }}
+{% endblock %}
+
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1">Driver</h2>
+        <div class="text-muted">{{ instrument.name }}</div>
+    </div>
+    <div class="d-flex gap-2">
+        <a class="btn btn-outline-secondary" href="{% url 'instrument_list' %}">
+            Back
+        </a>
+        <a class="btn btn-outline-primary"
+           href="{% url 'instrument_edit' instrument.pk %}">
+            Edit instrument
+        </a>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-body">
+        <dl class="row mb-0">
+            <dt class="col-sm-4">Driver</dt>
+            <dd class="col-sm-8">{{ instrument.get_driver_display }}</dd>
+
+            <dt class="col-sm-4">Address</dt>
+            <dd class="col-sm-8"><code>{{ instrument.address }}</code></dd>
+
+            <dt class="col-sm-4">Status</dt>
+            <dd class="col-sm-8">
+                <span class="badge text-bg-{{ instrument.status_badge }}">
+                    {{ instrument.get_status_display }}
+                </span>
+            </dd>
+
+            <dt class="col-sm-4">Last tested</dt>
+            <dd class="col-sm-8">
+                {{ instrument.last_driver_test_at|default:"Never" }}
+            </dd>
+
+            <dt class="col-sm-4">Identification</dt>
+            <dd class="col-sm-8">
+                {{ instrument.last_identification|default:"Not available" }}
+            </dd>
+
+            {% if instrument.last_driver_error %}
+                <dt class="col-sm-4">Last error</dt>
+                <dd class="col-sm-8 text-danger">
+                    {{ instrument.last_driver_error }}
+                </dd>
+            {% endif %}
+        </dl>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        <h3 class="h5">Connection test</h3>
+        <p class="text-muted">
+            Opens the configured device, sends <code>*IDN?</code>, reads its
+            identity, returns front-panel control with <code>SYST:LOC</code>,
+            and closes the connection without changing measurement settings.
+        </p>
+        <form method="post"
+              action="{% url 'instrument_driver_test' instrument.pk %}">
+            {% csrf_token %}
+            <button class="btn btn-primary" type="submit">Test driver</button>
+        </form>
+    </div>
+</div>
+
+<div class="card shadow-sm mt-4">
+    <div class="card-body">
+        <h3 class="h5">DC Voltage Auto mode</h3>
+        <p class="text-muted">
+            Removes stale SCPI errors, selects DC voltage with autorange,
+            verifies each new command, and reads the function and autorange
+            state back from the instrument.
+        </p>
+        <form method="post"
+              action="{% url 'instrument_driver_test_dcv' instrument.pk %}">
+            {% csrf_token %}
+            <button class="btn btn-primary" type="submit">
+                Test DCV Auto
+            </button>
+        </form>
+    </div>
+</div>
+
+{% endblock %}

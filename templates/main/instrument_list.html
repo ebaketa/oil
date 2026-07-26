@@ -33,25 +33,53 @@ Instruments
                 <th scope="col">Driver</th>
                 <th scope="col">Address</th>
                 <th scope="col">Status</th>
+                <th scope="col">Action</th>
             </tr>
         </thead>
         <tbody>
-            {% for instrument in instruments %}
-                <tr>
-                    <td>{{ instrument.name }}</td>
+                {% for instrument in instruments %}
+                    <tr>
+                        <td>
+                            <a href="{% url 'instrument_edit' instrument.pk %}">
+                                {{ instrument.name }}
+                            </a>
+                        </td>
                     <td>{{ instrument.manufacturer }}</td>
                     <td>{{ instrument.model_name }}</td>
-                    <td>{{ instrument.get_driver_display }}</td>
+                    <td>
+                        <a href="{% url 'instrument_driver' instrument.pk %}">
+                            {{ instrument.get_driver_display }}
+                        </a>
+                    </td>
                     <td><code>{{ instrument.address }}</code></td>
                     <td>
-                        <span class="badge text-bg-{{ instrument.status_badge }}">
-                            {{ instrument.get_status_display }}
-                        </span>
+                        {% if instrument.is_online %}
+                            <span class="badge text-bg-success">Online</span>
+                        {% else %}
+                            <span class="badge text-bg-info">Reachable</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if instrument.is_online %}
+                            <form method="post" action="{% url 'instrument_disconnect' instrument.pk %}">
+                                {% csrf_token %}
+                                <button class="btn btn-sm btn-outline-danger" type="submit">
+                                    Disconnect
+                                </button>
+                            </form>
+                        {% else %}
+                            <form method="post" action="{% url 'instrument_connect' instrument.pk %}">
+                                {% csrf_token %}
+                                <button class="btn btn-sm btn-primary" type="submit">
+                                    Connect
+                                </button>
+                            </form>
+                        {% endif %}
                     </td>
                 </tr>
             {% empty %}
                 <tr>
-                    <td colspan="6" class="text-center text-muted py-4">
+                    <td colspan="7" class="text-center text-muted py-4">
                         No instruments have been added yet.
                     </td>
                 </tr>
