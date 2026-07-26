@@ -5,14 +5,39 @@ from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.shortcuts import redirect, render
 
-from .forms import ProfileForm
-from .models import UserPreference
+from .forms import InstrumentForm, ProfileForm
+from .models import Instrument, UserPreference
 
 
 @login_required
-def home(request):
-    """Render the home page."""
-    return render(request, "main/home.html")
+def dashboard(request):
+    """Render the dashboard page."""
+    instruments = Instrument.objects.all()
+    return render(
+        request,
+        "main/dashboard.html",
+        {
+            "instruments": instruments,
+            "instrument_count": instruments.count(),
+            "online_instrument_count": instruments.filter(
+                status=Instrument.Status.ONLINE,
+            ).count(),
+        },
+    )
+
+
+@login_required
+def instrument_list(request):
+    """Display the laboratory instrument inventory."""
+    instruments = Instrument.objects.all()
+    return render(
+        request,
+        "main/instrument_list.html",
+        {
+            "instruments": instruments,
+            "instrument_count": instruments.count(),
+        },
+    )
 
 
 @login_required
@@ -40,7 +65,7 @@ def profile(request):
                 preference.theme = form.cleaned_data["theme"]
                 preference.save(update_fields=["theme"])
             messages.success(request, "Your profile has been updated.")
-            return redirect("home")
+            return redirect("dashboard")
     else:
         form = ProfileForm(
             instance=request.user,
@@ -48,3 +73,18 @@ def profile(request):
         )
 
     return render(request, "main/profile.html", {"form": form})
+
+
+@login_required
+def instrument_create(request):
+    """Display and process the new-instrument form."""
+    if request.method == "POST":
+        form = InstrumentForm(request.POST)
+        if form.is_valid():
+            instrument = form.save()
+            messages.success(request, f"{instrument.name} has been added.")
+            return redirect("instrument_list")
+    else:
+        form = InstrumentForm()
+
+    return render(request, "main/instrument_form.html", {"form": form})

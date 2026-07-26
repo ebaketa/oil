@@ -3,7 +3,7 @@
 from django import forms
 from django.contrib.auth import get_user_model
 
-from .models import UserPreference
+from .models import Instrument, UserPreference
 
 
 class ProfileForm(forms.ModelForm):
@@ -40,3 +40,34 @@ class ProfileForm(forms.ModelForm):
             raise forms.ValidationError("This username is already in use.")
 
         return username
+
+
+class InstrumentForm(forms.ModelForm):
+    """Create an instrument inventory record."""
+
+    class Meta:
+        """Configure editable instrument fields."""
+
+        model = Instrument
+        fields = (
+            "name",
+            "manufacturer",
+            "model_name",
+            "serial_number",
+            "driver",
+            "address",
+            "description",
+        )
+        widgets = {
+            "description": forms.Textarea(attrs={"rows": 3}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        """Apply Bootstrap styling to instrument fields."""
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            css_class = "form-select" if isinstance(
+                field.widget,
+                forms.Select,
+            ) else "form-control"
+            field.widget.attrs["class"] = css_class

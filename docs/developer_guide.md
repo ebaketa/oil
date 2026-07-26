@@ -38,6 +38,12 @@ mkdocs build --strict
 
 The generated `site/` directory is ignored by Git.
 
+## Dashboard cards
+
+Dashboard summary cards use `card oil-dashboard-card` on the card container and
+`oil-dashboard-card-title` on the title. Reuse these classes for new cards so
+borders, shadows, height, title size, and text colour stay consistent.
+
 ## Application development service
 
 Install the supplied systemd unit to keep the local Django development server

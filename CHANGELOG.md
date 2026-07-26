@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-07-26
+
+### Added
+
+- Testable Agilent 34401A serial/FTDI and Keysight 34461A USBTMC instrument
+  drivers with a shared measurement contract.
+- Dashboard instrument summary and a dedicated Instruments page for inventory
+  browsing and authenticated instrument creation.
+
+### Changed
+
+- Renamed the Home page to Dashboard.
+
 ## [0.0.1] - 2026-07-26
 
 ### Added
@@ -23,5 +36,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the public Python API.
 - GNU Affero General Public License, version 3 or later.
 
-[Unreleased]: https://github.com/ebaketa/oil/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/ebaketa/oil/compare/v0.0.2...HEAD
+[0.0.2]: https://github.com/ebaketa/oil/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/ebaketa/oil/releases/tag/v0.0.1

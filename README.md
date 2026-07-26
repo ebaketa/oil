@@ -5,7 +5,9 @@ Copyright © 2026 Elvis Baketa
 Open Instrument Lab (OIL) is a Django application for laboratory instrument
 workflows.
 
-The current application provides authenticated Home, About, and Contact pages.
+The current application provides authenticated Dashboard, instrument inventory,
+user profile, About, and Contact pages. Initial drivers support the Agilent
+34401A over serial/FTDI and the Keysight 34461A over Linux USBTMC.
 
 Notable project changes are recorded in the [`CHANGELOG.md`](CHANGELOG.md)
 file.

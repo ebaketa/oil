@@ -8,3 +8,20 @@ This reference is generated from source-code docstrings with
     options:
       show_root_heading: true
       members_order: source
+
+## Instrument drivers
+
+::: drivers.base
+    options:
+      show_root_heading: true
+      members_order: source
+
+::: drivers.agilent_34401a
+    options:
+      show_root_heading: true
+      members_order: source
+
+::: drivers.keysight_34461a
+    options:
+      show_root_heading: true
+      members_order: source

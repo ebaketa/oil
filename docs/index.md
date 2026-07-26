@@ -3,9 +3,11 @@
 Open Instrument Lab (OIL) is a Django application intended to support
 laboratory instrument workflows.
 
-The project is currently in an early development stage. Authenticated users
-can access the Home, About, and Contact pages; instrument management and
-measurement features have not yet been implemented.
+The project is currently in an early development stage. Authenticated users can
+manage a shared instrument inventory from the Dashboard and Instruments pages.
+Initial drivers support the Agilent 34401A over serial/FTDI and the Keysight
+34461A over Linux USBTMC. Hardware connection and measurement workflows have
+not yet been exposed through the application interface.
 
 ## Documentation workflow
 
