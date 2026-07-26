@@ -13,12 +13,23 @@ Measurements
             {{ measurement_count }} measurement{{ measurement_count|pluralize }}
         </div>
     </div>
-    <a class="btn btn-outline-secondary" href="{% url 'dashboard' %}">
-        Back
-    </a>
+    <div class="d-flex gap-2">
+        <a class="btn btn-outline-secondary" href="{% url 'dashboard' %}">
+            Back
+        </a>
+        <a class="btn btn-primary" href="{% url 'measurement_create' %}">
+            Single
+        </a>
+        <a class="btn btn-primary" href="{% url 'measurement_continuous' %}">
+            Continuous
+        </a>
+        <a class="btn btn-primary" href="{% url 'measurement_loop' %}">
+            Loop
+        </a>
+    </div>
 </div>
 
-<div class="table-responsive">
+<div class="table-responsive oil-measurement-table-scroll">
     <table class="table table-striped table-hover align-middle">
         <thead>
             <tr>

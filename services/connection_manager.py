@@ -90,9 +90,32 @@ class ConnectionManager:
 
             try:
                 yield driver
+            except Exception:
+                cls._disconnect_locked(instrument_id)
+                raise
             finally:
-                if not already_connected:
+                if (
+                    not already_connected
+                    and instrument_id in cls._connections
+                ):
                     cls._disconnect_locked(instrument_id)
+
+    @classmethod
+    @contextmanager
+    def temporary_session(
+        cls,
+        instrument: "Instrument",
+    ) -> Iterator[BaseInstrumentDriver]:
+        """Open one fresh connection and always close it after the operation."""
+        instrument_id = cls._instrument_id(instrument)
+
+        with cls._lock_for(instrument):
+            cls._disconnect_locked(instrument_id)
+            driver = cls.connect(instrument)
+            try:
+                yield driver
+            finally:
+                cls._disconnect_locked(instrument_id)
 
     @classmethod
     def _disconnect_locked(cls, instrument_id: int) -> None:

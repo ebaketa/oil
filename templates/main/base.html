@@ -10,7 +10,7 @@
 
     <link rel="stylesheet" href="{% static 'vendor/bootstrap/css/bootstrap.min.css' %}">
 
-    <link rel="stylesheet" href="{% static 'main/css/style.css' %}?v=3">
+    <link rel="stylesheet" href="{% static 'main/css/style.css' %}?v=4">
 
 </head>
 
@@ -196,6 +196,7 @@
 
     <script src="{% static 'vendor/bootstrap/js/bootstrap.bundle.min.js' %}"></script>
     <script src="{% static 'main/js/messages.js' %}"></script>
+    {% block scripts %}{% endblock %}
 
 </body>
 </html>

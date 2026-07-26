@@ -79,6 +79,19 @@ because `*OPC?` can remain pending after its configuration command. It waits for
 the command, checks `SYST:ERR?`, and relies on the same function and autorange
 read-back as the authoritative state confirmation.
 
+The Agilent measurement transport follows the instrument manual's 9600 baud,
+8 data bits, no parity, and 2 stop bits framing. Error codes 511, 512, and 513
+indicate RS-232 framing, overrun, and parity failures. NPLC 100 conversions can
+take longer than a fixed five-second delay, so OIL does not force NPLC 100.
+DC voltage measurements use autorange and wait within a bounded response
+window. Configuration completes before the first requested conversion; repeated
+physical session tests confirmed that an additional discarded warm-up
+conversion is unnecessary.
+
+Keysight 34461A measurements use the same DC voltage autorange policy without
+forcing a fixed 10 V range or NPLC 100. Its USBTMC transport does not require
+the Agilent-specific serial framing.
+
 An instrument marked `Reachable` passed its most recent driver operation.
 `Online` on the Dashboard is reserved for a currently open managed connection;
 temporary operations normally return it to zero after cleanup. The Dashboard
@@ -89,8 +102,45 @@ the reachable count.
 
 The Dashboard shows the number of stored measurements and links to a dedicated
 Measurements page. Measurement records reference their instrument and store a
-normalized parameter, numeric value, unit, and capture timestamp. Driver
-measurement actions will populate this model in a later workflow.
+normalized parameter, numeric value, unit, optional notes, and capture
+timestamp.
+
+The Single measurement form selects an instrument and a supported operation.
+Submitting DC voltage uses a managed connection, calls the driver's normalized
+measurement method, and stores the result only after successful communication.
+A failed operation stores the driver error on the instrument and does not
+create a measurement record. Temporary connections return front-panel control
+after the operation, while a connection opened explicitly from the inventory
+remains open.
+
+The Loop form performs a bounded series of 2 to 100 readings at intervals from
+0.1 to 3600 seconds. A single managed connection is held for the series, and
+each successful reading is stored independently. The initial implementation
+runs synchronously, so the browser request remains open until the loop
+finishes, then displays that series in a results table below the configuration
+form. Long-running and scheduled acquisition should move to a dedicated
+instrument worker.
+
+With JavaScript enabled, the loop form uses an authenticated POST streaming
+endpoint. The server holds one connection and emits newline-delimited JSON
+after each stored reading; the browser appends each record to the table before
+the next interval completes. Proxy buffering is explicitly disabled for this
+response. The regular synchronous form submission remains available as a
+non-JavaScript fallback.
+
+Once a loop starts, its editable fields are hidden and the selected instrument,
+function, count, interval, and notes are copied into a two-row summary above
+the results. Invalid settings restore the form before any hardware operation
+begins.
+
+Continuous measurement uses the same live NDJSON result format but has no
+predefined count. Start opens one temporary connection, applies the selected
+driver configuration once, and stores and streams readings until Stop is
+selected. Each browser run supplies a UUID owned by the signed-in user. The
+Stop endpoint sets a process-local event, which interrupts the interval wait
+and lets the generator's cleanup close the instrument immediately. Leaving the
+page also sends the same stop request. A multi-process deployment should move
+these stop signals to shared infrastructure or a dedicated instrument worker.
 
 ## Access control
 

@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-07-26
+
+### Added
+
+- New measurement workflow for selecting an instrument, performing a DC voltage
+  reading, and storing the normalized result with optional notes.
+- Finite measurement loops with a selected count and interval, using one managed
+  instrument connection for the complete series and displaying the resulting
+  readings directly below the loop form.
+- Live loop result streaming that appends each reading to the results table as
+  soon as the instrument returns it.
+- Loop configuration fields collapse after Start and remain visible as a
+  two-row summary above the live result table.
+- Continuous measurement with one connection and one instrument configuration,
+  live stored results, an interruptible interval, and explicit Start and Stop
+  controls.
+
+### Changed
+
+- Live loop success notifications now close automatically after four seconds,
+  matching Django success messages elsewhere in the interface.
+- Agilent 34401A measurements use the proven model-specific initialization,
+  command sequence, and timing from the original standalone reader.
+- Agilent serial connections allow the FTDI and instrument interface to settle
+  before the first Remote command.
+- The vendored Agilent reader uses the original half-second FTDI startup delay
+  before entering Remote mode.
+- Agilent RS-232 uses the manual-specified 8N2 framing; DC voltage measurements
+  use autorange without forcing NPLC 100 and wait within a bounded response
+  window.
+- Agilent setup no longer performs and discards a warm-up conversion; repeated
+  physical tests confirmed the first requested DCV Auto reading is reliable,
+  reducing connection preparation by about one second.
+- Agilent measurement sessions leave the front-panel display enabled, removing
+  another half-second from connection setup and disconnect.
+- Keysight 34461A measurements now use DC voltage autorange without forcing a
+  10 V range or NPLC 100.
+- Agilent DC voltage setup clears late FTDI input immediately before entering
+  Remote mode, matching the original standalone reader.
+- Agilent connections prepare DC voltage once when opened; Loop readings then
+  send only `READ?`, matching the lifecycle of the proven standalone reader.
+- Agilent connection setup enumerates FTDI ports before opening the configured
+  device, matching the original reader's USB-serial discovery sequence.
+- Agilent reads poll for completion within a bounded ten-second window instead
+  of depending on a single fixed-time buffer check.
+- Failed driver sessions now discard their cached connection so a later retry
+  cannot reuse a desynchronized serial or USBTMC stream.
+- Measurement actions are presented as Single, Continuous, and Loop workflows.
+
 ## [0.0.3] - 2026-07-26
 
 ### Added
@@ -69,7 +118,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the public Python API.
 - GNU Affero General Public License, version 3 or later.
 
-[Unreleased]: https://github.com/ebaketa/oil/compare/v0.0.3...HEAD
+[Unreleased]: https://github.com/ebaketa/oil/compare/v0.0.4...HEAD
+[0.0.4]: https://github.com/ebaketa/oil/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/ebaketa/oil/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/ebaketa/oil/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/ebaketa/oil/releases/tag/v0.0.1

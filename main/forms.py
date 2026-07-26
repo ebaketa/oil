@@ -2,6 +2,7 @@
 
 from django import forms
 from django.contrib.auth import get_user_model
+from django.db.models import TextChoices
 
 from .models import Instrument, UserPreference
 
@@ -71,3 +72,88 @@ class InstrumentForm(forms.ModelForm):
                 forms.Select,
             ) else "form-control"
             field.widget.attrs["class"] = css_class
+
+
+class MeasurementForm(forms.Form):
+    """Select an instrument and the measurement it should perform."""
+
+    class Type(TextChoices):
+        """Measurement operations currently supported by every driver."""
+
+        DC_VOLTAGE = "dc_voltage", "DC voltage"
+
+    instrument = forms.ModelChoiceField(
+        queryset=Instrument.objects.none(),
+    )
+    measurement_type = forms.ChoiceField(
+        choices=Type.choices,
+        label="Measurement",
+    )
+    notes = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+    )
+
+    def __init__(self, *args, **kwargs):
+        """Load current instruments and apply Bootstrap field styling."""
+        super().__init__(*args, **kwargs)
+        self.fields["instrument"].queryset = Instrument.objects.all()
+
+        for field in self.fields.values():
+            css_class = "form-select" if isinstance(
+                field.widget,
+                forms.Select,
+            ) else "form-control"
+            field.widget.attrs["class"] = css_class
+
+class LoopMeasurementForm(MeasurementForm):
+    """Configure a finite sequence of measurements."""
+
+    field_order = (
+        "instrument",
+        "measurement_type",
+        "count",
+        "interval_seconds",
+        "notes",
+    )
+
+    count = forms.IntegerField(
+        min_value=2,
+        max_value=100,
+        initial=10,
+        label="Number of measurements",
+    )
+    interval_seconds = forms.FloatField(
+        min_value=0.1,
+        max_value=3600,
+        initial=1,
+        label="Interval (seconds)",
+    )
+
+    def __init__(self, *args, **kwargs):
+        """Apply the loop-specific function label."""
+        super().__init__(*args, **kwargs)
+        self.fields["measurement_type"].label = "Measurement (Function)"
+
+
+class ContinuousMeasurementForm(MeasurementForm):
+    """Configure measurements that continue until explicitly stopped."""
+
+    field_order = (
+        "instrument",
+        "measurement_type",
+        "interval_seconds",
+        "notes",
+    )
+
+    interval_seconds = forms.FloatField(
+        min_value=0.1,
+        max_value=3600,
+        initial=1,
+        label="Interval (seconds)",
+    )
+
+    def __init__(self, *args, **kwargs):
+        """Apply the continuous-measurement function label."""
+        super().__init__(*args, **kwargs)
+        self.fields["measurement_type"].label = "Measurement (Function)"

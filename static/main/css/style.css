@@ -105,6 +105,22 @@ body.oil-theme {
     line-height: 1.2;
 }
 
+.oil-measurement-table-scroll {
+    max-height: 28rem;
+    overflow-y: auto;
+}
+
+.oil-measurement-table-scroll table {
+    margin-bottom: 0;
+}
+
+.oil-measurement-table-scroll thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background-color: var(--bs-body-bg);
+}
+
 .nav-link:hover {
     text-decoration: underline;
 }

@@ -1,5 +1,6 @@
 """Driver for the Keysight 34461A digital multimeter over Linux USBTMC."""
 
+import time
 from typing import BinaryIO, Callable
 
 from .base import BaseInstrumentDriver, MeasurementResult
@@ -24,6 +25,7 @@ class Keysight34461ADriver(BaseInstrumentDriver):
         self.nplc = nplc
         self._open_device = open_device
         self.device: BinaryIO | None = None
+        self._dc_voltage_prepared = False
 
     def connect(self) -> None:
         """Open the USBTMC device without changing instrument settings."""
@@ -55,6 +57,7 @@ class Keysight34461ADriver(BaseInstrumentDriver):
         """Close the USBTMC device without sending more commands."""
         device, self.device = self.device, None
         self.connected = False
+        self._dc_voltage_prepared = False
         if device is not None and not device.closed:
             device.close()
 
@@ -92,11 +95,20 @@ class Keysight34461ADriver(BaseInstrumentDriver):
         return self.query("*IDN?")
 
     def measure_dc_voltage(self) -> MeasurementResult:
-        """Measure DC voltage and return a normalized numeric result."""
+        """Measure DC voltage in autorange and return a normalized result."""
         try:
-            self.write(f"CONF:VOLT:DC {self.voltage_range}")
-            self.write(f"VOLT:DC:NPLC {self.nplc}")
-            value = float(self.query("READ?"))
+            if not self._dc_voltage_prepared:
+                self.write("*CLS")
+                time.sleep(0.5)
+                self.write("CONF:VOLT:DC")
+                time.sleep(0.1)
+                self.write("VOLT:DC:RANG:AUTO ON")
+                time.sleep(0.1)
+                self._dc_voltage_prepared = True
+
+            self.write("READ?")
+            time.sleep(0.5)
+            value = float(self.read_response())
         except (ValueError, CommunicationError) as exc:
             raise MeasurementError(
                 "The Keysight 34461A did not return a valid DC voltage."

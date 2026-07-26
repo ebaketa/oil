@@ -20,34 +20,72 @@ from .keysight_34461a import Keysight34461ADriver
 class Agilent34401ADriverTests(SimpleTestCase):
     """Verify Agilent serial communication and measurement handling."""
 
+    @patch("drivers.a34401a_reader.time.sleep")
+    @patch("drivers.a34401a_reader.list_ports.comports")
     @patch("serial.Serial")
-    def test_connect_does_not_send_instrument_commands(self, serial_factory):
-        """Connecting opens the port without changing instrument settings."""
-        connection = MagicMock(is_open=True)
+    def test_connect_prepares_dc_voltage_measurement(
+        self,
+        serial_factory,
+        comports,
+        _sleep,
+    ):
+        """Connecting follows the original reader's initialization lifecycle."""
+        connection = MagicMock(is_open=True, in_waiting=0)
         serial_factory.return_value = connection
+        comports.return_value = [
+            SimpleNamespace(
+                serial_number="A9Z22QXP",
+                device="/dev/ttyUSB0",
+            ),
+        ]
         driver = Agilent34401ADriver(port="/dev/ttyUSB0")
 
         driver.connect()
 
         self.assertTrue(driver.connected)
         serial_factory.assert_called_once()
-        connection.write.assert_not_called()
+        self.assertEqual(
+            serial_factory.call_args.kwargs["stopbits"],
+            2,
+        )
+        self.assertTrue(driver._dc_voltage_prepared)
 
+    @patch("drivers.a34401a_reader.time.sleep")
+    @patch("drivers.a34401a_reader.list_ports.comports")
     @patch("serial.Serial")
-    def test_identification_session_returns_local_control(self, serial_factory):
+    def test_identification_session_returns_local_control(
+        self,
+        serial_factory,
+        comports,
+        _sleep,
+    ):
         """Identification ends by returning front-panel control."""
-        connection = MagicMock(is_open=True)
+        connection = MagicMock(is_open=True, in_waiting=0)
         connection.readline.return_value = b"HEWLETT-PACKARD,34401A,0,1.0\n"
         serial_factory.return_value = connection
+        comports.return_value = [
+            SimpleNamespace(
+                serial_number="A9Z22QXP",
+                device="/dev/ttyUSB0",
+            ),
+        ]
         driver = Agilent34401ADriver(port="/dev/ttyUSB0")
 
-        with driver:
-            identity = driver.identify()
+        with patch.object(driver, "_prepare_dc_voltage"):
+            with driver:
+                identity = driver.identify()
 
         self.assertEqual(identity, "HEWLETT-PACKARD,34401A,0,1.0")
         self.assertEqual(
             [call.args[0] for call in connection.write.call_args_list],
-            [b"*IDN?\n", b"SYST:LOC\n"],
+            [
+                b"SYSTem:REMote\n",
+                b"*CLS\n",
+                b"CONF:VOLT:DC\n",
+                b"VOLT:DC:RANG:AUTO ON\n",
+                b"*IDN?\n",
+                b"SYSTem:LOCal\n",
+            ],
         )
         connection.close.assert_called_once()
 
@@ -73,17 +111,12 @@ class Agilent34401ADriverTests(SimpleTestCase):
     def test_measurement_returns_normalized_result(self):
         """A numeric response becomes a unit-bearing measurement result."""
         driver = Agilent34401ADriver(port="/dev/ttyUSB0")
+        driver.transport = MagicMock()
+        driver.transport.get_data.return_value = "1.2345"
 
-        with (
-            patch.object(driver, "write") as write,
-            patch.object(driver, "query", return_value="1.2345"),
-        ):
-            result = driver.measure_dc_voltage()
+        result = driver.measure_dc_voltage()
 
-        self.assertEqual(
-            [call.args[0] for call in write.call_args_list],
-            ["CONF:VOLT:DC 10", "VOLT:DC:NPLC 100"],
-        )
+        driver.transport.get_data.assert_called_once_with()
         self.assertEqual(
             result,
             MeasurementResult(parameter="Voltage DC", value=1.2345, unit="V"),
@@ -92,13 +125,34 @@ class Agilent34401ADriverTests(SimpleTestCase):
     def test_measurement_rejects_invalid_response(self):
         """A malformed serial response becomes a measurement error."""
         driver = Agilent34401ADriver(port="/dev/ttyUSB0")
+        driver.transport = MagicMock()
+        driver.transport.get_data.return_value = "invalid"
 
-        with (
-            patch.object(driver, "write"),
-            patch.object(driver, "query", return_value="invalid"),
-        ):
-            with self.assertRaises(MeasurementError):
-                driver.measure_dc_voltage()
+        with self.assertRaises(MeasurementError):
+            driver.measure_dc_voltage()
+
+    @patch("drivers.agilent_34401a.time.sleep")
+    def test_prepare_dcv_uses_proven_serial_sequence(self, sleep):
+        """DCV setup follows the timing proven by the original reader."""
+        driver = Agilent34401ADriver(port="/dev/ttyUSB0")
+        driver.serial_connection = MagicMock()
+
+        driver._prepare_dc_voltage()
+
+        driver.serial_connection.reset_input_buffer.assert_called_once_with()
+        self.assertEqual(
+            [call.args[0] for call in driver.serial_connection.write.call_args_list],
+            [
+                b"SYSTem:REMote\n",
+                b"*CLS\n",
+                b"CONF:VOLT:DC\n",
+                b"VOLT:DC:RANG:AUTO ON\n",
+            ],
+        )
+        self.assertEqual(
+            [call.args[0] for call in sleep.call_args_list],
+            [0.5, 0.5, 0.1, 0.1],
+        )
 
     @patch("drivers.agilent_34401a.time.sleep")
     def test_execute_uses_error_queue_without_opc_query(self, sleep):
@@ -120,6 +174,7 @@ class Agilent34401ADriverTests(SimpleTestCase):
         driver = Agilent34401ADriver(port="/dev/ttyUSB0")
 
         with (
+            patch.object(driver, "_enter_remote") as enter_remote,
             patch.object(driver, "execute") as execute,
             patch.object(
                 driver,
@@ -129,6 +184,7 @@ class Agilent34401ADriverTests(SimpleTestCase):
         ):
             result = driver.configure_dc_voltage_auto()
 
+        enter_remote.assert_called_once_with()
         self.assertEqual(
             [call.args[0] for call in execute.call_args_list],
             ["CONF:VOLT:DC", "VOLT:DC:RANG:AUTO ON"],
@@ -192,24 +248,58 @@ class Keysight34461ADriverTests(SimpleTestCase):
         with self.assertRaises(CommunicationError):
             driver.read_response()
 
-    def test_measurement_returns_normalized_result(self):
-        """A numeric USBTMC response becomes a measurement result."""
+    @patch("drivers.keysight_34461a.time.sleep")
+    def test_measurement_returns_normalized_result(self, sleep):
+        """A numeric USBTMC response becomes an autoranged DCV result."""
         driver = Keysight34461ADriver()
 
         with (
             patch.object(driver, "write") as write,
-            patch.object(driver, "query", return_value="-0.015"),
+            patch.object(driver, "read_response", return_value="-0.015"),
         ):
             result = driver.measure_dc_voltage()
 
         self.assertEqual(
             [call.args[0] for call in write.call_args_list],
-            ["CONF:VOLT:DC 10", "VOLT:DC:NPLC 100"],
+            ["*CLS", "CONF:VOLT:DC", "VOLT:DC:RANG:AUTO ON", "READ?"],
+        )
+        self.assertEqual(
+            [call.args[0] for call in sleep.call_args_list],
+            [0.5, 0.1, 0.1, 0.5],
         )
         self.assertEqual(
             result,
             MeasurementResult(parameter="Voltage DC", value=-0.015, unit="V"),
         )
+
+    @patch("drivers.keysight_34461a.time.sleep")
+    def test_measurement_loop_configures_dcv_auto_only_once(self, sleep):
+        """One connection reuses DCV Auto configuration for later readings."""
+        driver = Keysight34461ADriver()
+
+        with (
+            patch.object(driver, "write") as write,
+            patch.object(driver, "read_response", side_effect=["1.0", "2.0"]),
+        ):
+            first = driver.measure_dc_voltage()
+            second = driver.measure_dc_voltage()
+
+        self.assertEqual(
+            [call.args[0] for call in write.call_args_list],
+            [
+                "*CLS",
+                "CONF:VOLT:DC",
+                "VOLT:DC:RANG:AUTO ON",
+                "READ?",
+                "READ?",
+            ],
+        )
+        self.assertEqual(
+            [call.args[0] for call in sleep.call_args_list],
+            [0.5, 0.1, 0.1, 0.5, 0.5],
+        )
+        self.assertEqual(first.value, 1.0)
+        self.assertEqual(second.value, 2.0)
 
     def test_execute_confirms_completion_and_no_scpi_error(self):
         """A command succeeds only after OPC and error-queue confirmation."""

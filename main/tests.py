@@ -1,10 +1,14 @@
+import json
+import uuid
+from threading import Event
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 from django.urls import reverse
 
-from drivers.base import FunctionConfiguration
+from drivers.base import FunctionConfiguration, MeasurementResult
 from drivers.exceptions import CommunicationError, ConfigurationError
 
 from .instrument_services import connect_instrument as run_connect
@@ -13,6 +17,11 @@ from .instrument_services import (
     test_instrument_dc_voltage_mode as run_dcv_mode_test,
 )
 from .instrument_services import test_instrument_driver as run_driver_test
+from .measurement_services import (
+    iter_continuous_measurements,
+    perform_measurement,
+    perform_measurement_loop,
+)
 from .models import Instrument, Measurement, UserPreference
 
 
@@ -37,6 +46,9 @@ class AuthenticationTests(TestCase):
             ("instrument_list", "/instruments/"),
             ("instrument_create", "/instruments/add/"),
             ("measurement_list", "/measurements/"),
+            ("measurement_create", "/measurements/new/"),
+            ("measurement_continuous", "/measurements/continuous/"),
+            ("measurement_loop", "/measurements/loop/"),
         )
 
         for route_name, path in protected_pages:
@@ -76,6 +88,8 @@ class AuthenticationTests(TestCase):
             "instrument_list",
             "instrument_create",
             "measurement_list",
+            "measurement_create",
+            "measurement_loop",
         ):
             with self.subTest(route_name=route_name):
                 response = self.client.get(reverse(route_name))
@@ -92,6 +106,9 @@ class AuthenticationTests(TestCase):
             "instrument_list": "Instruments | OIL",
             "instrument_create": "Add instrument | OIL",
             "measurement_list": "Measurements | OIL",
+            "measurement_create": "Single measurement | OIL",
+            "measurement_continuous": "Continuous measurement | OIL",
+            "measurement_loop": "Measurement loop | OIL",
         }
 
         for route_name, title in expected_titles.items():
@@ -786,7 +803,382 @@ class MeasurementListTests(TestCase):
         response = self.client.get(reverse("measurement_list"))
 
         self.assertContains(response, "No measurements have been recorded yet.")
+        self.assertContains(response, reverse("measurement_create"))
         self.assertEqual(response.context["measurement_count"], 0)
+
+    def test_new_measurement_page_offers_supported_choices(self):
+        """The form allows selection of an instrument and DC voltage."""
+        response = self.client.get(reverse("measurement_create"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "<title>Single measurement | OIL</title>",
+            html=True,
+        )
+        self.assertContains(response, "Reference DMM")
+        self.assertContains(response, "DC voltage")
+        self.assertContains(response, "Measure")
+        self.assertContains(response, "Measurement result")
+        self.assertContains(
+            response,
+            "No single measurement has been recorded yet.",
+        )
+
+    def test_measurement_list_links_to_loop_form(self):
+        """The measurement list offers a separate Loop action."""
+        response = self.client.get(reverse("measurement_list"))
+
+        self.assertContains(response, reverse("measurement_loop"))
+        self.assertContains(response, "Loop")
+
+    def test_measurement_list_links_to_continuous_form(self):
+        """Continuous appears between the Single and Loop actions."""
+        response = self.client.get(reverse("measurement_list"))
+        content = response.content.decode()
+
+        self.assertContains(response, reverse("measurement_continuous"))
+        self.assertLess(content.index("Single"), content.index("Continuous"))
+        self.assertLess(content.index("Continuous"), content.index("Loop"))
+
+    def test_continuous_form_offers_start_and_stop_controls(self):
+        """The continuous page exposes settings and live result controls."""
+        response = self.client.get(reverse("measurement_continuous"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "<title>Continuous measurement | OIL</title>",
+            html=True,
+        )
+        self.assertContains(response, "Measurement (Function)")
+        self.assertContains(response, "Interval (seconds)")
+        self.assertContains(response, "Start")
+        self.assertContains(response, "Stop")
+        self.assertContains(response, "Measurement results")
+
+    @patch("main.views.iter_continuous_measurements")
+    def test_continuous_stream_returns_live_ndjson(self, iterate):
+        """The continuous endpoint streams every yielded stored reading."""
+        first = Measurement.objects.create(
+            instrument=self.instrument,
+            parameter="Voltage DC",
+            value=2.0,
+            unit="V",
+        )
+        second = Measurement.objects.create(
+            instrument=self.instrument,
+            parameter="Voltage DC",
+            value=2.1,
+            unit="V",
+        )
+        iterate.return_value = iter((first, second))
+        session_id = str(uuid.uuid4())
+
+        response = self.client.post(
+            reverse("measurement_continuous_stream"),
+            {
+                "instrument": self.instrument.pk,
+                "measurement_type": "dc_voltage",
+                "interval_seconds": 0.5,
+                "notes": "Monitor",
+                "session_id": session_id,
+            },
+        )
+        records = [
+            json.loads(line)
+            for line in b"".join(response.streaming_content).decode().splitlines()
+        ]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([record["index"] for record in records], [1, 2])
+        self.assertEqual([record["value"] for record in records], [2.0, 2.1])
+        iterate.assert_called_once()
+
+    def test_continuous_stop_signals_owned_session(self):
+        """Stop accepts an active session belonging to the signed-in user."""
+        from .continuous_sessions import ContinuousSessionRegistry
+
+        session_id = str(uuid.uuid4())
+        stop_event = ContinuousSessionRegistry.start(session_id, self.user.pk)
+        try:
+            response = self.client.post(
+                reverse("measurement_continuous_stop"),
+                {"session_id": session_id},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(stop_event.is_set())
+        finally:
+            ContinuousSessionRegistry.finish(session_id)
+
+    def test_loop_form_accepts_bounded_series_settings(self):
+        """The loop page shows instrument, count, and interval controls."""
+        response = self.client.get(reverse("measurement_loop"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "<title>Measurement loop | OIL</title>",
+            html=True,
+        )
+        self.assertContains(response, "Measurement (Function)")
+        self.assertContains(response, "Number of measurements")
+        self.assertContains(response, "Interval (seconds)")
+        self.assertContains(response, "Notes")
+        self.assertContains(response, "Start")
+        self.assertContains(response, "Measurement results")
+        self.assertContains(
+            response,
+            "No loop measurements have been recorded yet.",
+        )
+
+    @patch("main.views.perform_measurement")
+    def test_valid_form_performs_measurement_and_displays_result(self, perform):
+        """A valid request displays the measured value below the form."""
+        perform.return_value = Measurement(
+            instrument=self.instrument,
+            parameter="Voltage DC",
+            value=1.25,
+            unit="V",
+        )
+
+        response = self.client.post(
+            reverse("measurement_create"),
+            {
+                "instrument": self.instrument.pk,
+                "measurement_type": "dc_voltage",
+                "notes": "Input reference",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Measurement result")
+        self.assertContains(response, "Reference DMM")
+        self.assertContains(response, "Voltage DC")
+        self.assertContains(response, "1.25")
+        self.assertContains(response, "DC voltage")
+        self.assertContains(response, "Input reference")
+        self.assertContains(response, 'id="measurement-single-repeat"', html=False)
+        self.assertEqual(
+            response.context["measurement_summary"]["instrument"],
+            "Reference DMM (Keysight 34461A)",
+        )
+        perform.assert_called_once_with(
+            self.instrument,
+            "dc_voltage",
+            notes="Input reference",
+        )
+
+    @patch("main.views.perform_measurement")
+    def test_single_result_endpoint_returns_live_table_row(self, perform):
+        """Each Single request returns one result that JavaScript can append."""
+        perform.return_value = Measurement(
+            instrument=self.instrument,
+            parameter="Voltage DC",
+            value=1.5,
+            unit="V",
+            timestamp=timezone.now(),
+        )
+
+        response = self.client.post(
+            reverse("measurement_single_result"),
+            {
+                "instrument": self.instrument.pk,
+                "measurement_type": "dc_voltage",
+                "notes": "Repeated reading",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["instrument"], "Reference DMM")
+        self.assertEqual(response.json()["parameter"], "Voltage DC")
+        self.assertEqual(response.json()["value"], 1.5)
+        perform.assert_called_once_with(
+            self.instrument,
+            "dc_voltage",
+            notes="Repeated reading",
+        )
+
+    @patch("main.views.perform_measurement")
+    def test_driver_error_is_displayed_without_redirect(self, perform):
+        """Hardware errors remain on the measurement form."""
+        perform.side_effect = CommunicationError("Device timed out.")
+
+        response = self.client.post(
+            reverse("measurement_create"),
+            {
+                "instrument": self.instrument.pk,
+                "measurement_type": "dc_voltage",
+                "notes": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Measurement failed: Device timed out.",
+        )
+
+    @patch("main.views.perform_measurement_loop")
+    def test_valid_loop_form_runs_series_and_displays_results(self, perform_loop):
+        """Valid loop settings display the completed series below the form."""
+        perform_loop.return_value = [
+            Measurement(
+                instrument=self.instrument,
+                parameter="Voltage DC",
+                value=value,
+                unit="V",
+            )
+            for value in (1.0, 1.1, 1.2)
+        ]
+
+        response = self.client.post(
+            reverse("measurement_loop"),
+            {
+                "instrument": self.instrument.pk,
+                "measurement_type": "dc_voltage",
+                "count": 3,
+                "interval_seconds": 0.5,
+                "notes": "Stability run",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        perform_loop.assert_called_once_with(
+            self.instrument,
+            "dc_voltage",
+            count=3,
+            interval_seconds=0.5,
+            notes="Stability run",
+        )
+        self.assertEqual(len(response.context["measurements"]), 3)
+        self.assertEqual(
+            response.context["loop_summary"]["instrument"],
+            str(self.instrument),
+        )
+        self.assertEqual(
+            response.context["loop_summary"]["measurement"],
+            "DC voltage",
+        )
+        self.assertEqual(response.context["loop_summary"]["count"], 3)
+        self.assertEqual(
+            response.context["loop_summary"]["interval_seconds"],
+            0.5,
+        )
+        self.assertContains(response, "Stability run")
+        self.assertContains(response, 'class="mb-4 d-none"')
+        self.assertContains(response, "1.0")
+        self.assertContains(response, "1.1")
+        self.assertContains(response, "1.2")
+        self.assertNotContains(
+            response,
+            "No loop measurements have been recorded yet.",
+        )
+
+    @patch("main.views.perform_measurement_loop")
+    def test_loop_form_displays_hardware_error(self, perform_loop):
+        """A failed series remains on its form with a useful error."""
+        perform_loop.side_effect = CommunicationError("Device timed out.")
+
+        response = self.client.post(
+            reverse("measurement_loop"),
+            {
+                "instrument": self.instrument.pk,
+                "measurement_type": "dc_voltage",
+                "count": 3,
+                "interval_seconds": 0.5,
+                "notes": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Measurement loop failed: Device timed out.",
+        )
+
+    def test_loop_form_rejects_unsafe_limits(self):
+        """Count and interval constraints are validated before hardware use."""
+        response = self.client.post(
+            reverse("measurement_loop"),
+            {
+                "instrument": self.instrument.pk,
+                "measurement_type": "dc_voltage",
+                "count": 101,
+                "interval_seconds": 0,
+                "notes": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Ensure this value is less than or equal to 100.",
+        )
+        self.assertContains(
+            response,
+            "Ensure this value is greater than or equal to 0.1.",
+        )
+
+    @patch("main.views.iter_measurement_loop")
+    def test_loop_stream_returns_each_result_as_ndjson(self, iterate):
+        """The live endpoint streams one JSON record per measurement."""
+        first = Measurement.objects.create(
+            instrument=self.instrument,
+            parameter="Voltage DC",
+            value=1.0,
+            unit="V",
+        )
+        second = Measurement.objects.create(
+            instrument=self.instrument,
+            parameter="Voltage DC",
+            value=1.1,
+            unit="V",
+        )
+        iterate.return_value = iter((first, second))
+
+        response = self.client.post(
+            reverse("measurement_loop_stream"),
+            {
+                "instrument": self.instrument.pk,
+                "measurement_type": "dc_voltage",
+                "count": 2,
+                "interval_seconds": 0.5,
+                "notes": "Live run",
+            },
+        )
+        payload = b"".join(response.streaming_content).decode()
+        records = [json.loads(line) for line in payload.splitlines()]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/x-ndjson")
+        self.assertEqual(response["X-Accel-Buffering"], "no")
+        self.assertEqual([record["index"] for record in records], [1, 2])
+        self.assertEqual([record["value"] for record in records], [1.0, 1.1])
+        iterate.assert_called_once_with(
+            self.instrument,
+            "dc_voltage",
+            count=2,
+            interval_seconds=0.5,
+            notes="Live run",
+        )
+
+    def test_loop_stream_rejects_invalid_settings_before_streaming(self):
+        """Invalid live requests return structured validation errors."""
+        response = self.client.post(
+            reverse("measurement_loop_stream"),
+            {
+                "instrument": self.instrument.pk,
+                "measurement_type": "dc_voltage",
+                "count": 101,
+                "interval_seconds": 0,
+                "notes": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("count", response.json()["errors"])
+        self.assertIn("interval_seconds", response.json()["errors"])
 
     def test_measurement_page_displays_stored_reading(self):
         """A stored reading is shown with instrument, parameter, and unit."""
@@ -819,3 +1211,123 @@ class MeasurementListTests(TestCase):
         self.assertContains(response, reverse("measurement_list"))
         self.assertContains(response, "Measurements")
         self.assertEqual(response.context["measurement_count"], 1)
+
+
+class MeasurementServiceTests(TestCase):
+    """Test measurement execution without accessing physical hardware."""
+
+    def setUp(self):
+        """Create an instrument used by measurement service tests."""
+        self.instrument = Instrument.objects.create(
+            name="Reference DMM",
+            manufacturer="Keysight",
+            model_name="34461A",
+            driver=Instrument.Driver.KEYSIGHT_34461A,
+            address="/dev/usbtmc0",
+        )
+
+    @patch("main.measurement_services.ConnectionManager.temporary_session")
+    def test_dc_voltage_measurement_is_stored(self, session):
+        """A normalized driver result is persisted with user notes."""
+        driver = MagicMock()
+        driver.measure_dc_voltage.return_value = MeasurementResult(
+            parameter="Voltage DC",
+            value=1.234,
+            unit="V",
+        )
+        session.return_value.__enter__.return_value = driver
+
+        measurement = perform_measurement(
+            self.instrument,
+            "dc_voltage",
+            notes="Reference input",
+        )
+
+        self.instrument.refresh_from_db()
+        self.assertEqual(Measurement.objects.count(), 1)
+        self.assertEqual(measurement.value, 1.234)
+        self.assertEqual(measurement.unit, "V")
+        self.assertEqual(measurement.notes, "Reference input")
+        self.assertEqual(self.instrument.status, Instrument.Status.REACHABLE)
+        self.assertEqual(self.instrument.last_driver_error, "")
+
+    @patch("main.measurement_services.ConnectionManager.temporary_session")
+    def test_measurement_failure_does_not_store_a_result(self, session):
+        """A hardware failure records an error without creating a reading."""
+        session.return_value.__enter__.side_effect = CommunicationError(
+            "Device timed out."
+        )
+
+        with self.assertRaises(CommunicationError):
+            perform_measurement(self.instrument, "dc_voltage")
+
+        self.instrument.refresh_from_db()
+        self.assertFalse(Measurement.objects.exists())
+        self.assertEqual(self.instrument.status, Instrument.Status.ERROR)
+        self.assertEqual(
+            self.instrument.last_driver_error,
+            "Device timed out.",
+        )
+
+    @patch("main.measurement_services.time.sleep")
+    @patch("main.measurement_services.ConnectionManager.temporary_session")
+    def test_loop_uses_one_session_and_requested_intervals(
+        self,
+        session,
+        sleep,
+    ):
+        """A series reuses its connection and waits only between readings."""
+        driver = MagicMock()
+        driver.measure_dc_voltage.side_effect = (
+            MeasurementResult("Voltage DC", 1.0, "V"),
+            MeasurementResult("Voltage DC", 1.1, "V"),
+            MeasurementResult("Voltage DC", 1.2, "V"),
+        )
+        session.return_value.__enter__.return_value = driver
+
+        measurements = perform_measurement_loop(
+            self.instrument,
+            "dc_voltage",
+            count=3,
+            interval_seconds=0.5,
+            notes="Stability run",
+        )
+
+        session.assert_called_once_with(self.instrument)
+        self.assertEqual(driver.measure_dc_voltage.call_count, 3)
+        self.assertEqual(sleep.call_count, 2)
+        sleep.assert_called_with(0.5)
+        self.assertEqual(len(measurements), 3)
+        self.assertEqual(Measurement.objects.count(), 3)
+
+    @patch("main.measurement_services.ConnectionManager.temporary_session")
+    def test_continuous_measurement_reuses_connection_until_stopped(
+        self,
+        session,
+    ):
+        """Continuous readings share one session and stop via an Event."""
+        driver = MagicMock()
+        driver.measure_dc_voltage.side_effect = (
+            MeasurementResult("Voltage DC", 1.0, "V"),
+            MeasurementResult("Voltage DC", 1.1, "V"),
+        )
+        session.return_value.__enter__.return_value = driver
+        stop_event = MagicMock(spec=Event)
+        stop_event.is_set.return_value = False
+        stop_event.wait.side_effect = (False, True)
+
+        measurements = list(
+            iter_continuous_measurements(
+                self.instrument,
+                "dc_voltage",
+                interval_seconds=0.5,
+                stop_event=stop_event,
+                notes="Monitor",
+            ),
+        )
+
+        session.assert_called_once_with(self.instrument)
+        self.assertEqual(driver.measure_dc_voltage.call_count, 2)
+        self.assertEqual(stop_event.wait.call_count, 2)
+        self.assertEqual(len(measurements), 2)
+        self.assertEqual(Measurement.objects.count(), 2)

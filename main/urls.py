@@ -10,6 +10,41 @@ urlpatterns = [
     path('instruments/add/', views.instrument_create, name='instrument_create'),
     path('measurements/', views.measurement_list, name='measurement_list'),
     path(
+        'measurements/new/',
+        views.measurement_create,
+        name='measurement_create',
+    ),
+    path(
+        'measurements/single/result/',
+        views.measurement_single_result,
+        name='measurement_single_result',
+    ),
+    path(
+        'measurements/loop/',
+        views.measurement_loop,
+        name='measurement_loop',
+    ),
+    path(
+        'measurements/continuous/',
+        views.measurement_continuous,
+        name='measurement_continuous',
+    ),
+    path(
+        'measurements/continuous/stream/',
+        views.measurement_continuous_stream,
+        name='measurement_continuous_stream',
+    ),
+    path(
+        'measurements/continuous/stop/',
+        views.measurement_continuous_stop,
+        name='measurement_continuous_stop',
+    ),
+    path(
+        'measurements/loop/stream/',
+        views.measurement_loop_stream,
+        name='measurement_loop_stream',
+    ),
+    path(
         'instruments/<int:pk>/edit/',
         views.instrument_edit,
         name='instrument_edit',

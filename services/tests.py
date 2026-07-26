@@ -79,6 +79,39 @@ class ConnectionManagerTests(SimpleTestCase):
         self.assertTrue(ConnectionManager.is_connected(self.instrument))
 
     @patch("services.connection_manager.create_driver")
+    def test_temporary_session_replaces_and_closes_existing_connection(
+        self,
+        factory,
+    ):
+        """A temporary operation owns one fresh connection through cleanup."""
+        existing = self.connected_driver()
+        temporary = self.connected_driver()
+        factory.side_effect = (existing, temporary)
+        ConnectionManager.connect(self.instrument)
+
+        with ConnectionManager.temporary_session(self.instrument) as active:
+            self.assertIs(active, temporary)
+            self.assertTrue(ConnectionManager.is_connected(self.instrument))
+
+        existing.disconnect.assert_called_once()
+        temporary.disconnect.assert_called_once()
+        self.assertFalse(ConnectionManager.is_connected(self.instrument))
+
+    @patch("services.connection_manager.create_driver")
+    def test_session_discards_preexisting_connection_after_error(self, factory):
+        """A failed operation cannot leave a poisoned connection cached."""
+        driver = self.connected_driver()
+        factory.return_value = driver
+        ConnectionManager.connect(self.instrument)
+
+        with self.assertRaises(ConnectionError):
+            with ConnectionManager.session(self.instrument):
+                raise ConnectionError("Communication failed.")
+
+        driver.disconnect.assert_called_once()
+        self.assertFalse(ConnectionManager.is_connected(self.instrument))
+
+    @patch("services.connection_manager.create_driver")
     def test_failed_connection_is_disconnected_and_not_cached(self, factory):
         """A failed driver is cleaned up and never reported online."""
         driver = self.connected_driver()
