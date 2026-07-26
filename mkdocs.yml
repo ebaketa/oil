@@ -1,0 +1,27 @@
+site_name: OIL Documentation
+site_description: Open Instrument Lab documentation.
+site_url: https://github.com/ebaketa/oil
+repo_url: https://github.com/ebaketa/oil
+repo_name: ebaketa/oil
+
+theme:
+  name: readthedocs
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths:
+            - .
+          options:
+            docstring_style: google
+            members_order: source
+            show_source: false
+
+nav:
+  - Overview: index.md
+  - Installation: installation.md
+  - Architecture: architecture.md
+  - Developer Guide: developer_guide.md
+  - API Reference: api.md

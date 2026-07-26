@@ -1,0 +1,30 @@
+{% extends "main/base.html" %}
+
+{% block title %}
+Log in
+{% endblock %}
+
+{% block content %}
+
+<div class="mx-auto" style="max-width: 28rem;">
+    <h2 class="mb-4">Log in</h2>
+
+    {% if form.errors %}
+        <div class="alert alert-danger" role="alert">
+            The username or password is incorrect.
+        </div>
+    {% endif %}
+
+    <form method="post">
+        {% csrf_token %}
+        {{ form.as_p }}
+
+        {% if next %}
+            <input type="hidden" name="next" value="{{ next }}">
+        {% endif %}
+
+        <button class="btn btn-primary" type="submit">Log in</button>
+    </form>
+</div>
+
+{% endblock %}

@@ -1,0 +1,108 @@
+.oil-theme {
+    --oil-theme-color: #0d6efd;
+    --oil-theme-dark: #084298;
+    --oil-theme-foreground: #fff;
+    --oil-theme-soft: #e7f1ff;
+}
+
+.oil-theme-red {
+    --oil-theme-color: #dc3545;
+    --oil-theme-dark: #842029;
+    --oil-theme-soft: #f8d7da;
+}
+
+.oil-theme-green {
+    --oil-theme-color: #198754;
+    --oil-theme-dark: #0f5132;
+    --oil-theme-soft: #d1e7dd;
+}
+
+.oil-theme-yellow {
+    --oil-theme-color: #ffc107;
+    --oil-theme-dark: #997404;
+    --oil-theme-foreground: #212529;
+    --oil-theme-soft: #fff3cd;
+}
+
+.oil-theme-orange {
+    --oil-theme-color: #fd7e14;
+    --oil-theme-dark: #984c0c;
+    --oil-theme-foreground: #212529;
+    --oil-theme-soft: #ffe5d0;
+}
+
+.oil-theme-purple {
+    --oil-theme-color: #6f42c1;
+    --oil-theme-dark: #432874;
+    --oil-theme-soft: #e2d9f3;
+}
+
+.oil-theme-teal {
+    --oil-theme-color: #20c997;
+    --oil-theme-dark: #13795b;
+    --oil-theme-foreground: #212529;
+    --oil-theme-soft: #d2f4ea;
+}
+
+body.oil-theme {
+    background-color: var(--oil-theme-soft) !important;
+}
+
+.oil-theme-bg {
+    color: var(--oil-theme-foreground);
+    background-color: var(--oil-theme-color);
+}
+
+.oil-theme-bg a {
+    color: var(--oil-theme-foreground) !important;
+}
+
+.oil-theme-nav {
+    background-color: var(--oil-theme-dark);
+}
+
+.oil-theme .btn-primary {
+    --bs-btn-bg: var(--oil-theme-color);
+    --bs-btn-border-color: var(--oil-theme-color);
+    --bs-btn-hover-bg: var(--oil-theme-dark);
+    --bs-btn-hover-border-color: var(--oil-theme-dark);
+    --bs-btn-active-bg: var(--oil-theme-dark);
+    --bs-btn-active-border-color: var(--oil-theme-dark);
+    --bs-btn-color: var(--oil-theme-foreground);
+}
+
+.oil-theme-outline {
+    color: var(--oil-theme-foreground);
+    border-color: var(--oil-theme-foreground);
+}
+
+.oil-theme-outline:hover,
+.oil-theme-outline:focus {
+    color: var(--oil-theme-color);
+    background-color: var(--oil-theme-foreground);
+    border-color: var(--oil-theme-foreground);
+}
+
+.oil-profile-link {
+    color: var(--oil-theme-foreground);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.oil-profile-link:hover,
+.oil-profile-link:focus {
+    color: var(--oil-theme-foreground);
+    text-decoration: underline;
+}
+
+.nav-link:hover {
+    text-decoration: underline;
+}
+
+.list-group-item a {
+    text-decoration: none;
+}
+
+.list-group-item:hover a {
+    text-decoration: underline;
+}

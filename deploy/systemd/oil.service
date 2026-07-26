@@ -1,0 +1,15 @@
+[Unit]
+Description=OIL Django development server
+After=network.target
+
+[Service]
+Type=simple
+User=ebaketa
+Group=ebaketa
+WorkingDirectory=/var/www/oil
+ExecStart=/var/www/oil/run.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
