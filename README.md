@@ -40,21 +40,18 @@ signed Django data. `OIL_DEBUG=True` is intended only for local development;
 omit it from deployed environments. Django automatically reads the ignored
 local `.env` file, while existing process variables take precedence.
 
-To run the application as a persistent local development service:
+To install the application and documentation preview as persistent systemd
+services from any checkout location:
 
 ```bash
-sudo install -d -m 700 /etc/oil
-python -c 'from django.core.management.utils import get_random_secret_key; print("OIL_SECRET_KEY=" + get_random_secret_key()); print("OIL_ALLOWED_HOSTS=oil.example.com"); print("OIL_SERVER_HOST=127.0.0.1")' | sudo tee /etc/oil/oil.env >/dev/null
-sudo chmod 600 /etc/oil/oil.env
-sudo cp deploy/systemd/oil.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now oil
+chmod +x run.sh run-docs.sh deploy/install-systemd.sh
+sudo ./deploy/install-systemd.sh --user "$USER"
 ```
 
 Set `OIL_ALLOWED_HOSTS` to a comma-separated list of the exact IP addresses or
-DNS names used to reach the application. Do not use `*`.
-The supplied systemd units use `/opt/oil` as a neutral example installation
-directory; adjust both paths in a unit when deploying elsewhere.
+DNS names used to reach the application. Do not use `*`. The installer detects
+the checkout path and renders both units for the selected account. Both
+launchers read the checkout's ignored `.env` file.
 
 ## Documentation
 
@@ -69,13 +66,7 @@ The documentation preview is available at
 `http://127.0.0.1:10001/`. Run `mkdocs build --strict` before publishing
 documentation changes.
 
-To run the documentation preview as a persistent local service:
-
-```bash
-sudo cp deploy/systemd/oil-docs.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now oil-docs
-```
+The systemd installer above installs this preview together with the application.
 
 ## License
 

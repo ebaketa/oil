@@ -29,22 +29,40 @@ Changing it invalidates existing sessions and other signed Django data.
 the systemd environment file. Django reads `.env` automatically for local
 development without overriding variables already supplied by the environment.
 
-For the supplied systemd service, store the key in its root-readable
-environment file before starting the service:
+## Systemd deployment
+
+Install both services from the checked-out application directory:
 
 ```bash
-sudo install -d -m 700 /etc/oil
-python -c 'from django.core.management.utils import get_random_secret_key; print("OIL_SECRET_KEY=" + get_random_secret_key()); print("OIL_ALLOWED_HOSTS=oil.example.com"); print("OIL_SERVER_HOST=127.0.0.1")' | sudo tee /etc/oil/oil.env >/dev/null
-sudo chmod 600 /etc/oil/oil.env
-sudo cp deploy/systemd/oil.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now oil
+chmod +x run.sh run-docs.sh deploy/install-systemd.sh
+sudo ./deploy/install-systemd.sh --user "$USER"
+```
+
+The installer detects the checkout path instead of assuming `/opt/oil`, renders
+both systemd units with the selected account and its primary group, validates
+the virtual environment and `.env`, then enables and starts the services.
+Use `--app-dir PATH` only when installing a checkout other than the one that
+contains the installer. Use `--no-start` to install the units without starting
+them.
+
+Both launchers read host and port settings directly from the checkout's `.env`;
+a separate `/etc/oil/oil.env` is not required. Keep `.env` readable only by the
+service account:
+
+```bash
+chmod 600 .env
 ```
 
 Set `OIL_ALLOWED_HOSTS` to the exact comma-separated IP addresses or DNS names
-used to reach the application. Do not use `*`.
-The supplied systemd units use `/opt/oil` as a neutral example installation
-directory; adjust both paths in a unit when deploying elsewhere.
+used to reach the application. Do not use `*`. `OIL_SERVER_HOST` and
+`OIL_DOCS_HOST` may use the server's specific interface address.
+
+Inspect the installed services with:
+
+```bash
+sudo systemctl status oil oil-docs --no-pager -l
+sudo journalctl -u oil -u oil-docs -n 100 --no-pager
+```
 
 ## Documentation site
 

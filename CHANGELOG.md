@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.7] - 2026-07-27
+
+### Fixed
+
+- Replaced host-specific systemd units with a portable installer that detects
+  the checkout path and service account, and made the documentation launcher
+  read its host and port from the same `.env` file as the Django launcher.
+
 ## [0.0.6] - 2026-07-27
 
 ### Added
@@ -181,7 +189,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the public Python API.
 - GNU Affero General Public License, version 3 or later.
 
-[Unreleased]: https://github.com/ebaketa/oil/compare/v0.0.6...HEAD
+[Unreleased]: https://github.com/ebaketa/oil/compare/v0.0.7...HEAD
+[0.0.7]: https://github.com/ebaketa/oil/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/ebaketa/oil/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/ebaketa/oil/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/ebaketa/oil/compare/v0.0.3...v0.0.4

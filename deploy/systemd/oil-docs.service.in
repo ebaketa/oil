@@ -4,10 +4,10 @@ After=network.target
 
 [Service]
 Type=simple
-User=ebaketa
-Group=ebaketa
-WorkingDirectory=/opt/oil
-ExecStart=/opt/oil/run-docs.sh
+User=@OIL_USER@
+Group=@OIL_GROUP@
+WorkingDirectory=@OIL_APP_DIR@
+ExecStart=@OIL_APP_DIR@/run-docs.sh
 Restart=on-failure
 RestartSec=5
 

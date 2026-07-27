@@ -4,11 +4,10 @@ After=network.target
 
 [Service]
 Type=simple
-User=ebaketa
-Group=ebaketa
-WorkingDirectory=/opt/oil
-EnvironmentFile=/etc/oil/oil.env
-ExecStart=/opt/oil/run.sh
+User=@OIL_USER@
+Group=@OIL_GROUP@
+WorkingDirectory=@OIL_APP_DIR@
+ExecStart=@OIL_APP_DIR@/run.sh
 Restart=on-failure
 RestartSec=5
 

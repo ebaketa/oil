@@ -95,14 +95,18 @@ before it.
 
 ## Application development service
 
-Install the supplied systemd unit to keep the local Django development server
-running:
+Install the generated systemd units to keep the local Django development server
+and documentation preview running:
 
 ```bash
-sudo cp deploy/systemd/oil.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now oil
+chmod +x run.sh run-docs.sh deploy/install-systemd.sh
+sudo ./deploy/install-systemd.sh --user "$USER"
 ```
+
+The installer detects the checkout directory and renders both units for the
+selected user and primary group. Both launchers use host and port values from
+the checkout's `.env`; no fixed installation path or separate systemd
+environment file is required.
 
 Inspect the service and follow its logs with:
 
@@ -117,14 +121,8 @@ server.
 
 ## Documentation preview service
 
-Install the supplied systemd unit to keep the local documentation preview
-running:
-
-```bash
-sudo cp deploy/systemd/oil-docs.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now oil-docs
-```
+The application service installer also installs the documentation preview
+service.
 
 Inspect the service and follow its logs with:
 
