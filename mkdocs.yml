@@ -23,5 +23,6 @@ nav:
   - Overview: index.md
   - Installation: installation.md
   - Architecture: architecture.md
+  - JSON API: json_api.md
   - Developer Guide: developer_guide.md
   - API Reference: api.md

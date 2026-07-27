@@ -1,0 +1,143 @@
+{# Measurements domain template. #}
+{% extends "main/base.html" %}
+{% load static %}
+
+{% block title %}
+Continuous measurement
+{% endblock %}
+
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1">Continuous measurement</h2>
+        <div class="text-muted">
+            Measurements continue over one connection until Stop is selected.
+        </div>
+    </div>
+    <div class="d-flex gap-2">
+        <button class="btn btn-outline-primary"
+                type="button"
+                data-csv-export
+                data-csv-target="measurement-continuous-table"
+                data-csv-filename="oil-continuous-measurements"
+                disabled>
+            Download CSV
+        </button>
+        <a class="btn btn-outline-secondary"
+           href="{% url 'measurement_list' %}">
+            Back
+        </a>
+        <button class="btn btn-primary"
+                id="measurement-continuous-start"
+                type="submit"
+                form="measurement-continuous-form">
+            Start
+        </button>
+        <button class="btn btn-danger d-none"
+                id="measurement-continuous-stop"
+                type="button">
+            Stop
+        </button>
+    </div>
+</div>
+
+<form method="post"
+      class="mb-4"
+      id="measurement-continuous-form"
+      data-stream-url="{% url 'measurement_continuous_stream' %}"
+      data-stop-url="{% url 'measurement_continuous_stop' %}"
+      novalidate>
+    {% csrf_token %}
+
+    <div id="measurement-continuous-settings">
+        <div class="row g-3 mb-3">
+            <div class="col-md-4">
+                <label class="form-label"
+                       for="{{ form.instrument.id_for_label }}">
+                    {{ form.instrument.label }}
+                </label>
+                {{ form.instrument }}
+            </div>
+            <div class="col-md-4">
+                <label class="form-label"
+                       for="{{ form.measurement_type.id_for_label }}">
+                    {{ form.measurement_type.label }}
+                </label>
+                {{ form.measurement_type }}
+            </div>
+            <div class="col-md-4">
+                <label class="form-label"
+                       for="{{ form.interval_seconds.id_for_label }}">
+                    {{ form.interval_seconds.label }}
+                </label>
+                {{ form.interval_seconds }}
+            </div>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label" for="{{ form.notes.id_for_label }}">
+                {{ form.notes.label }}
+            </label>
+            {{ form.notes }}
+        </div>
+    </div>
+
+</form>
+
+<div id="measurement-continuous-message" aria-live="polite"></div>
+
+<h3 class="h5 mb-3">Measurement results</h3>
+
+<div class="alert alert-info d-none"
+     id="measurement-continuous-summary"
+     role="status">
+    <div class="row g-2">
+        <div class="col-md-6 col-xl-4">
+            <strong>Instrument:</strong>
+            <span id="continuous-summary-instrument"></span>
+        </div>
+        <div class="col-md-6 col-xl-4">
+            <strong>Measurement:</strong>
+            <span id="continuous-summary-measurement"></span>
+        </div>
+        <div class="col-md-6 col-xl-4">
+            <strong>Interval:</strong>
+            <span id="continuous-summary-interval"></span> seconds
+        </div>
+    </div>
+    <div class="mt-2">
+        <strong>Notes:</strong>
+        <span id="continuous-summary-notes">—</span>
+    </div>
+</div>
+
+<div class="table-responsive oil-measurement-table-scroll">
+    <table class="table table-striped table-hover align-middle"
+           id="measurement-continuous-table">
+        <thead>
+            <tr>
+                <th scope="col">#</th>
+                <th scope="col">Time</th>
+                <th scope="col">Instrument</th>
+                <th scope="col">Measurement</th>
+                <th scope="col" class="text-end">Value</th>
+                <th scope="col">Unit</th>
+            </tr>
+        </thead>
+        <tbody id="measurement-continuous-results">
+            <tr id="measurement-continuous-empty" data-csv-empty>
+                <td colspan="6" class="text-center text-muted py-4">
+                    No continuous measurements have been recorded yet.
+                </td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{% static 'main/js/measurement_csv.js' %}"></script>
+<script src="{% static 'main/js/measurement_continuous.js' %}?v=2"></script>
+{% endblock %}

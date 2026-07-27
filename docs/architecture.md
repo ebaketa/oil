@@ -8,11 +8,22 @@ Browser → Views → Services → ConnectionManager → Drivers → Instrument
 
 ## Current components
 
-- `config` contains project-wide Django settings and URL configuration.
-- `main` contains the application's URL routes and views.
-- `templates/main` contains the user-facing HTML templates.
+- `config` contains project-wide Django settings and root URL configuration.
+- `api` exposes session-authenticated JSON inventory and measurement endpoints
+  while reusing the domain forms and services.
+- `dashboard` owns the Dashboard, About, and Contact views and templates.
+- `accounts` owns the profile form, preference context processor, view, and
+  template.
+- `instruments` owns inventory forms, views, driver-operation services, URLs,
+  templates, and admin configuration.
+- `measurements` owns acquisition forms, views, services, session state, URLs,
+  templates, static assets, and admin configuration.
+- `main` is the transitional database and compatibility application. It retains
+  the existing models and migration history so application decomposition does
+  not rename tables, recreate records, or invalidate permissions.
 - `templates/registration` contains the login form used by Django auth views.
-- `static/main` contains project-specific static assets.
+- `templates/main/base.html` and shared static assets provide the common UI
+  shell; domain-specific templates and JavaScript live with their applications.
 - `UserPreference` stores each user's selected interface colour theme.
 - `Instrument` stores shared laboratory inventory, driver selection, device
   address, and connection status.
@@ -25,12 +36,16 @@ Browser → Views → Services → ConnectionManager → Drivers → Instrument
   views. The first drivers support the Agilent 34401A over serial/FTDI and the
   Keysight 34461A over Linux USBTMC, plus a deterministic Mock instrument for
   hardware-free development.
+- `drivers/transports` owns reusable communication channels for Serial/FTDI,
+  Linux USBTMC, and in-memory Mock operation.
 - `DriverRegistry` maps persistent inventory driver names to implementation
   classes without conditional logic in the driver factory.
 - `services` owns instrument connection lifecycle, caching, and concurrency.
 
-The project currently uses SQLite for local development. Hardware connection
-services and measurement workflows will be documented when they are introduced.
+The project currently uses SQLite for local development. Existing database
+tables retain their `main_*` names during the application decomposition.
+Compatibility imports in `main` allow external code to migrate gradually to
+the domain modules without changing runtime behavior.
 
 ## Instrument drivers
 
@@ -38,6 +53,19 @@ Both digital multimeter drivers implement the same lifecycle and measurement
 contract. Device addresses and measurement settings are supplied when a driver
 is created; importing a driver never opens hardware. Drivers support context
 managers so connections are closed after successful operations and exceptions.
+
+Drivers own model-specific SCPI commands, timing, capability metadata, and
+measurement normalization. They delegate communication to the shared
+`InstrumentTransport` contract:
+
+```text
+Driver → InstrumentTransport → Serial / USBTMC / Mock
+```
+
+Every transport implements `open`, `close`, `write`, `read`, and `query`.
+Serial additionally supports input-buffer cleanup needed by the Agilent
+initialization sequence. Transport injection keeps driver tests independent
+from physical hardware.
 
 Built-in implementations register their persistent names with
 `DriverRegistry`. The factory resolves the stored name and delegates inventory
@@ -105,10 +133,11 @@ because `*OPC?` can remain pending after its configuration command. It waits for
 the command, checks `SYST:ERR?`, and relies on the same function and autorange
 read-back as the authoritative state confirmation.
 
-The Agilent measurement transport follows the instrument manual's 9600 baud,
-8 data bits, no parity, and 2 stop bits framing. Error codes 511, 512, and 513
-indicate RS-232 framing, overrun, and parity failures. NPLC 100 conversions can
-take longer than a fixed five-second delay, so OIL does not force NPLC 100.
+The shared serial transport opens the Agilent connection at 9600 baud, 8 data
+bits, no parity, and 2 stop bits. The driver retains the model-specific Remote,
+clear, DCV Auto, and timing sequence. Error codes 511, 512, and 513 indicate
+RS-232 framing, overrun, and parity failures. NPLC 100 conversions can take
+longer than a fixed five-second delay, so OIL does not force NPLC 100.
 DC and AC voltage and two-wire resistance measurements use autorange and wait
 within a bounded response window. Configuration completes before the first
 requested conversion; repeated
@@ -116,8 +145,9 @@ physical session tests confirmed that an additional discarded warm-up
 conversion is unnecessary.
 
 Keysight 34461A measurements use the same function-specific autorange policy.
-DC voltage does not force a fixed 10 V range or NPLC 100. Its USBTMC transport
-does not require the Agilent-specific serial framing.
+DC voltage does not force a fixed 10 V range or NPLC 100. The reusable USBTMC
+transport opens the Linux device node in unbuffered binary mode and does not
+include Agilent-specific serial policy.
 
 An instrument marked `Reachable` passed its most recent driver operation.
 `Online` on the Dashboard is reserved for a currently open managed connection;
@@ -131,6 +161,13 @@ The Dashboard shows the number of stored measurements and links to a dedicated
 Measurements page. Measurement records reference their instrument and store a
 normalized parameter, numeric value, unit, optional notes, and capture
 timestamp.
+
+The Measurements page provides an authenticated streaming CSV export. Rows are
+read from the database in bounded chunks instead of buffering the complete
+dataset in memory. The file includes stable measurement and instrument columns,
+uses an Excel-compatible UTF-8 BOM, and prefixes formula-like user text so
+spreadsheet applications treat it as literal data. Numeric readings remain
+numeric, including negative values.
 
 `MeasurementRun` provides persistent series metadata for Single, Continuous,
 and Loop acquisitions. Its lifecycle supports pending, running, completed,

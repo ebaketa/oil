@@ -26,6 +26,21 @@ def read_measurement(instrument_id: int) -> float:
     """
 ```
 
+## Django application boundaries
+
+Place new code in the application that owns its domain:
+
+- `accounts` for profile and preference behavior
+- `dashboard` for summary and informational pages
+- `instruments` for inventory and driver operations
+- `measurements` for acquisition workflows and stored readings
+
+`main` remains the owner of existing database models and migrations during the
+transition. Its forms, views, services, context processor, and URL modules are
+compatibility imports only; new code must import from the domain application.
+Do not move a model to a new Django app label without an explicit state and
+data migration that preserves existing tables, content types, and permissions.
+
 ## Adding an instrument driver
 
 New instrument drivers must inherit from `BaseInstrumentDriver` and accept the
@@ -40,6 +55,23 @@ driver.
 For hardware-free development, add an instrument with driver `Mock instrument`
 and address `mock://default`. Use `mock://timeout` to simulate a measurement
 timeout or `mock://connection-error` to simulate unavailable hardware.
+
+## Instrument transports
+
+Drivers must use an `InstrumentTransport` implementation instead of opening
+serial ports or USBTMC device nodes directly. Reuse `SerialTransport`,
+`USBTMCTransport`, or `MockTransport` when their behavior matches the device.
+Add a new transport only for a genuinely different communication channel.
+
+Keep responsibilities separate:
+
+- transports open and close channels and transfer decoded SCPI messages
+- drivers define model-specific commands, timing, validation, and results
+- services manage driver lifecycles and persistence
+
+Inject transports into driver constructors in unit tests. Hardware-specific
+framing and timeout tests belong to the transport; SCPI sequence tests belong
+to the driver.
 
 ## Validation
 

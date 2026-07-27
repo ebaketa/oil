@@ -1,7 +1,6 @@
 """Driver for the Agilent 34401A digital multimeter over a serial port."""
 
 import time
-from typing import Any
 
 from .base import (
     BaseInstrumentDriver,
@@ -9,8 +8,8 @@ from .base import (
     MeasurementCapability,
     MeasurementResult,
 )
-from .agilent_34401a_transport import Agilent34401ATransport
 from .exceptions import CommunicationError, ConnectionError, MeasurementError
+from .transports import InstrumentTransport, SerialTransport
 
 
 class Agilent34401ADriver(BaseInstrumentDriver):
@@ -43,6 +42,7 @@ class Agilent34401ADriver(BaseInstrumentDriver):
         timeout: float = 1,
         voltage_range: float = 10,
         nplc: float = 100,
+        transport: InstrumentTransport | None = None,
     ) -> None:
         """Configure the driver without opening the serial port."""
         super().__init__()
@@ -55,8 +55,9 @@ class Agilent34401ADriver(BaseInstrumentDriver):
         self.timeout = timeout
         self.voltage_range = voltage_range
         self.nplc = nplc
-        self.serial_connection: Any | None = None
-        self.transport: Agilent34401ATransport | None = None
+        self._transport_override = transport
+        self.transport = transport
+        self.serial_connection = getattr(transport, "connection", None)
         self._dc_voltage_prepared = False
         self._prepared_function: str | None = None
 
@@ -76,13 +77,25 @@ class Agilent34401ADriver(BaseInstrumentDriver):
         )
 
     def connect(self) -> None:
-        """Open the serial port without changing instrument settings."""
+        """Open serial communication and apply the proven DCV Auto setup."""
         if self.connected:
             return
 
         try:
-            self.transport = Agilent34401ATransport(self._resolve_port())
-            self.serial_connection = self.transport.ser
+            if self.transport is None:
+                self.transport = SerialTransport(
+                    self._resolve_port(),
+                    baudrate=self.baudrate,
+                    timeout=self.timeout,
+                )
+            self.transport.open()
+            time.sleep(0.5)
+            self.serial_connection = getattr(
+                self.transport,
+                "connection",
+                None,
+            )
+            self._prepare_dc_voltage()
             self.connected = True
             self._dc_voltage_prepared = True
             self._prepared_function = "dc_voltage"
@@ -92,54 +105,45 @@ class Agilent34401ADriver(BaseInstrumentDriver):
 
     def disconnect(self) -> None:
         """Return local control and close the serial port."""
-        if self.transport is not None:
-            self.transport.close()
-            self.transport = None
-            self.serial_connection = None
-            self.connected = False
-            self._dc_voltage_prepared = False
-            self._prepared_function = None
-        else:
-            self._close_connection()
+        transport = self.transport
+        if transport is not None and transport.is_open:
+            try:
+                transport.write("SYSTem:LOCal")
+            except CommunicationError:
+                pass
+        self._close_connection()
 
     def _close_connection(self) -> None:
         """Close the serial connection without sending more commands."""
-        connection, self.serial_connection = self.serial_connection, None
-        self.transport = None
+        transport = self.transport
+        self.serial_connection = None
         self.connected = False
         self._dc_voltage_prepared = False
         self._prepared_function = None
-        if connection is not None and connection.is_open:
-            connection.close()
+        if transport is not None:
+            try:
+                transport.close()
+            except CommunicationError:
+                pass
+        self.transport = self._transport_override
 
     def write(self, command: str) -> None:
         """Send one newline-terminated SCPI command."""
-        if self.serial_connection is None or not self.serial_connection.is_open:
+        if self.transport is None or not self.transport.is_open:
             raise CommunicationError("The Agilent 34401A is not connected.")
-
-        try:
-            self.serial_connection.write(f"{command.rstrip()}\n".encode())
-        except OSError as exc:
-            raise CommunicationError("Could not write to the Agilent 34401A.") from exc
+        self.transport.write(command)
 
     def read_response(self) -> str:
         """Read and decode one response from the serial port."""
-        if self.serial_connection is None or not self.serial_connection.is_open:
+        if self.transport is None or not self.transport.is_open:
             raise CommunicationError("The Agilent 34401A is not connected.")
-
-        try:
-            response = self.serial_connection.readline()
-        except OSError as exc:
-            raise CommunicationError("Could not read from the Agilent 34401A.") from exc
-
-        if not response:
-            raise CommunicationError("The Agilent 34401A response timed out.")
-        return response.decode("utf-8", errors="replace").strip()
+        return self.transport.read()
 
     def query(self, command: str) -> str:
         """Send one SCPI query and return its response."""
-        self.write(command)
-        return self.read_response()
+        if self.transport is None:
+            raise CommunicationError("The Agilent 34401A is not connected.")
+        return self.transport.query(command)
 
     def identify(self) -> str:
         """Return the instrument identity response."""
@@ -147,20 +151,20 @@ class Agilent34401ADriver(BaseInstrumentDriver):
 
     def _enter_remote(self) -> None:
         """Enter RS-232 remote mode using the model's proven command timing."""
-        self.serial_connection.write("SYSTem:REMote\n".encode())
+        self.write("SYSTem:REMote")
         time.sleep(0.5)
 
     def _prepare_dc_voltage(self) -> None:
         """Apply the proven 34401A serial DC voltage setup sequence."""
-        if self.serial_connection is None:
+        if self.transport is None or not self.transport.is_open:
             raise CommunicationError("The Agilent 34401A is not connected.")
-        self.serial_connection.reset_input_buffer()
+        self.transport.reset_input_buffer()
         self._enter_remote()
-        self.serial_connection.write("*CLS\n".encode())
+        self.write("*CLS")
         time.sleep(0.5)
-        self.serial_connection.write("CONF:VOLT:DC\n".encode())
+        self.write("CONF:VOLT:DC")
         time.sleep(0.1)
-        self.serial_connection.write("VOLT:DC:RANG:AUTO ON\n".encode())
+        self.write("VOLT:DC:RANG:AUTO ON")
         time.sleep(0.1)
 
     def execute(self, command: str) -> None:
@@ -232,29 +236,18 @@ class Agilent34401ADriver(BaseInstrumentDriver):
                     "The Agilent 34401A is not connected."
                 )
             if self._prepared_function != function:
-                if self.serial_connection is None:
-                    raise CommunicationError(
-                        "The Agilent 34401A is not connected."
-                    )
-                self.serial_connection.reset_input_buffer()
-                self.serial_connection.write("*CLS\n".encode())
+                self.transport.reset_input_buffer()
+                self.write("*CLS")
                 time.sleep(0.5)
-                self.serial_connection.write(
-                    f"{configure_command}\n".encode()
-                )
+                self.write(configure_command)
                 time.sleep(0.1)
-                self.serial_connection.write(
-                    f"{autorange_command}\n".encode()
-                )
+                self.write(autorange_command)
                 time.sleep(0.1)
                 self._prepared_function = function
                 self._dc_voltage_prepared = function == "dc_voltage"
 
-            response = self.transport.get_data()
-            if response is None:
-                raise CommunicationError(
-                    "The Agilent 34401A response timed out."
-                )
+            self.write("READ?")
+            response = self.transport.read(timeout=10)
             value = float(response)
         except ValueError as exc:
             raise MeasurementError(

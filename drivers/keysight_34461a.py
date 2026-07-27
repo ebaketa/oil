@@ -5,6 +5,7 @@ from typing import BinaryIO, Callable
 
 from .base import BaseInstrumentDriver, MeasurementCapability, MeasurementResult
 from .exceptions import CommunicationError, ConnectionError, MeasurementError
+from .transports import InstrumentTransport, USBTMCTransport
 
 
 class Keysight34461ADriver(BaseInstrumentDriver):
@@ -35,6 +36,7 @@ class Keysight34461ADriver(BaseInstrumentDriver):
         voltage_range: float = 10,
         nplc: float = 100,
         open_device: Callable[..., BinaryIO] = open,
+        transport: InstrumentTransport | None = None,
     ) -> None:
         """Configure the driver without opening the USBTMC device."""
         super().__init__()
@@ -42,7 +44,10 @@ class Keysight34461ADriver(BaseInstrumentDriver):
         self.voltage_range = voltage_range
         self.nplc = nplc
         self._open_device = open_device
-        self.device: BinaryIO | None = None
+        self.transport = transport or USBTMCTransport(
+            device_path,
+            open_device=open_device,
+        )
         self._dc_voltage_prepared = False
         self._prepared_function: str | None = None
 
@@ -52,11 +57,7 @@ class Keysight34461ADriver(BaseInstrumentDriver):
             return
 
         try:
-            self.device = self._open_device(
-                self.device_path,
-                "rb+",
-                buffering=0,
-            )
+            self.transport.open()
             self.connected = True
         except (OSError, CommunicationError) as exc:
             self._close_device()
@@ -65,7 +66,7 @@ class Keysight34461ADriver(BaseInstrumentDriver):
     def disconnect(self) -> None:
         """Return local control and close the USBTMC device."""
         try:
-            if self.device is not None:
+            if self.transport.is_open:
                 self.write("SYST:LOC")
         except CommunicationError:
             pass
@@ -74,41 +75,41 @@ class Keysight34461ADriver(BaseInstrumentDriver):
 
     def _close_device(self) -> None:
         """Close the USBTMC device without sending more commands."""
-        device, self.device = self.device, None
         self.connected = False
         self._dc_voltage_prepared = False
         self._prepared_function = None
-        if device is not None and not device.closed:
-            device.close()
+        try:
+            self.transport.close()
+        except CommunicationError:
+            pass
+
+    @property
+    def device(self) -> BinaryIO | None:
+        """Expose the USBTMC handle for backwards-compatible diagnostics."""
+        return getattr(self.transport, "device", None)
+
+    @device.setter
+    def device(self, value: BinaryIO | None) -> None:
+        """Replace the USBTMC handle in compatibility tests."""
+        if not hasattr(self.transport, "device"):
+            raise AttributeError("The configured transport has no device handle.")
+        self.transport.device = value
 
     def write(self, command: str) -> None:
         """Send one newline-terminated SCPI command."""
-        if self.device is None:
+        if not self.transport.is_open:
             raise CommunicationError("The Keysight 34461A is not connected.")
-
-        try:
-            self.device.write(f"{command.rstrip()}\n".encode())
-        except OSError as exc:
-            raise CommunicationError("Could not write to the Keysight 34461A.") from exc
+        self.transport.write(command)
 
     def read_response(self, size: int = 400) -> str:
         """Read and decode one response from the USBTMC device."""
-        if self.device is None:
+        if not self.transport.is_open:
             raise CommunicationError("The Keysight 34461A is not connected.")
-
-        try:
-            response = self.device.read(size)
-        except OSError as exc:
-            raise CommunicationError("Could not read from the Keysight 34461A.") from exc
-
-        if not response:
-            raise CommunicationError("The Keysight 34461A returned an empty response.")
-        return response.decode("utf-8", errors="replace").strip()
+        return self.transport.read()
 
     def query(self, command: str) -> str:
         """Send one SCPI query and return its response."""
-        self.write(command)
-        return self.read_response()
+        return self.transport.query(command)
 
     def identify(self) -> str:
         """Return the instrument identity response."""

@@ -1,20 +1,5 @@
-"""Template context processors for the OIL application."""
+"""Compatibility import for the account preference context processor."""
 
-from .models import UserPreference
+from accounts.context_processors import user_theme
 
-
-def user_theme(request):
-    """Expose the current user's theme and available themes to templates."""
-    theme = UserPreference.Theme.BLUE
-
-    if request.user.is_authenticated:
-        theme = (
-            UserPreference.objects.filter(user=request.user)
-            .values_list("theme", flat=True)
-            .first()
-            or UserPreference.Theme.BLUE
-        )
-
-    return {
-        "oil_theme": theme,
-    }
+__all__ = ["user_theme"]

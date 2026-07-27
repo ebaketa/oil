@@ -1,0 +1,1 @@
+"""Laboratory instrument inventory application."""

@@ -13,6 +13,12 @@ and two-wire resistance on the Agilent 34401A over serial/FTDI, the Keysight
 Notable project changes are recorded in the [`CHANGELOG.md`](CHANGELOG.md)
 file.
 
+The Django application layer is organized by domain in `accounts`,
+`api`, `dashboard`, `instruments`, and `measurements`. The transitional `main`
+application retains the existing database models and migration history. The
+session-authenticated JSON API is available under `/api/`, and authenticated
+users can download stored measurements from `/measurements/export.csv`.
+
 ## Installation
 
 ```bash

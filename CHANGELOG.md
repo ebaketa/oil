@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.6] - 2026-07-27
+
+### Added
+
+- Added a session-authenticated, CSRF-protected JSON API for instrument
+  inventory list/detail, paginated stored measurements, and Single measurement
+  execution through the existing measurement service.
+- Added an authenticated streaming CSV export for stored measurements with
+  instrument metadata, stable columns, UTF-8 support, and spreadsheet formula
+  injection protection.
+- Added CSV downloads for the results currently displayed in the Single,
+  Continuous, and Loop measurement workflows.
+
+### Changed
+
+- Split dashboard, account, instrument, and measurement functionality into
+  dedicated Django applications while preserving all existing URLs and
+  database tables through a transitional `main` compatibility layer.
+- Renamed the Single measurement path from `/measurements/new/` to
+  `/measurements/single/` and removed the old route.
+- Added a shared transport contract with reusable Serial/FTDI, Linux USBTMC,
+  and in-memory Mock implementations. Instrument drivers now own SCPI policy
+  while transports own device opening, byte transfer, decoding, and cleanup.
+- Removed the legacy standalone Agilent reader and its model-specific transport
+  adapter after preserving its 8N2 framing, timing, input cleanup, and bounded
+  response polling in the shared serial transport and 34401A driver.
+
 ## [0.0.5] - 2026-07-27
 
 ### Added
@@ -154,7 +181,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the public Python API.
 - GNU Affero General Public License, version 3 or later.
 
-[Unreleased]: https://github.com/ebaketa/oil/compare/v0.0.4...HEAD
+[Unreleased]: https://github.com/ebaketa/oil/compare/v0.0.6...HEAD
+[0.0.6]: https://github.com/ebaketa/oil/compare/v0.0.5...v0.0.6
+[0.0.5]: https://github.com/ebaketa/oil/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/ebaketa/oil/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/ebaketa/oil/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/ebaketa/oil/compare/v0.0.1...v0.0.2

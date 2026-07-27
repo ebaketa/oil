@@ -17,14 +17,15 @@ from .factory import create_driver
 from .keysight_34461a import Keysight34461ADriver
 from .mock import MockInstrumentDriver
 from .registry import DriverRegistry
+from .transports import InstrumentTransport
 
 
 class Agilent34401ADriverTests(SimpleTestCase):
     """Verify Agilent serial communication and measurement handling."""
 
-    @patch("drivers.a34401a_reader.time.sleep")
-    @patch("drivers.a34401a_reader.list_ports.comports")
-    @patch("serial.Serial")
+    @patch("drivers.agilent_34401a.time.sleep")
+    @patch("serial.tools.list_ports.comports")
+    @patch("drivers.transports.serial.serial.Serial")
     def test_connect_prepares_dc_voltage_measurement(
         self,
         serial_factory,
@@ -52,9 +53,9 @@ class Agilent34401ADriverTests(SimpleTestCase):
         )
         self.assertTrue(driver._dc_voltage_prepared)
 
-    @patch("drivers.a34401a_reader.time.sleep")
-    @patch("drivers.a34401a_reader.list_ports.comports")
-    @patch("serial.Serial")
+    @patch("drivers.agilent_34401a.time.sleep")
+    @patch("serial.tools.list_ports.comports")
+    @patch("drivers.transports.serial.serial.Serial")
     def test_identification_session_returns_local_control(
         self,
         serial_factory,
@@ -81,10 +82,6 @@ class Agilent34401ADriverTests(SimpleTestCase):
         self.assertEqual(
             [call.args[0] for call in connection.write.call_args_list],
             [
-                b"SYSTem:REMote\n",
-                b"*CLS\n",
-                b"CONF:VOLT:DC\n",
-                b"VOLT:DC:RANG:AUTO ON\n",
                 b"*IDN?\n",
                 b"SYSTem:LOCal\n",
             ],
@@ -113,13 +110,15 @@ class Agilent34401ADriverTests(SimpleTestCase):
     def test_measurement_returns_normalized_result(self):
         """A numeric response becomes a unit-bearing measurement result."""
         driver = Agilent34401ADriver(port="/dev/ttyUSB0")
-        driver.transport = MagicMock()
-        driver.transport.get_data.return_value = "1.2345"
+        driver.transport = MagicMock(spec=InstrumentTransport)
+        driver.transport.is_open = True
+        driver.transport.read.return_value = "1.2345"
         driver._prepared_function = "dc_voltage"
 
         result = driver.measure_dc_voltage()
 
-        driver.transport.get_data.assert_called_once_with()
+        driver.transport.write.assert_called_once_with("READ?")
+        driver.transport.read.assert_called_once_with(timeout=10)
         self.assertEqual(
             result,
             MeasurementResult(parameter="Voltage DC", value=1.2345, unit="V"),
@@ -129,23 +128,25 @@ class Agilent34401ADriverTests(SimpleTestCase):
     def test_ac_voltage_and_resistance_reconfigure_serial_function(self, _sleep):
         """Function changes use the documented SCPI autorange sequences."""
         driver = Agilent34401ADriver(port="/dev/ttyUSB0")
-        driver.serial_connection = MagicMock()
-        driver.transport = MagicMock()
-        driver.transport.get_data.side_effect = ("2.5", "1000")
+        driver.transport = MagicMock(spec=InstrumentTransport)
+        driver.transport.is_open = True
+        driver.transport.read.side_effect = ("2.5", "1000")
         driver._prepared_function = "dc_voltage"
 
         ac_result = driver.measure_ac_voltage()
         resistance_result = driver.measure_resistance()
 
         self.assertEqual(
-            [call.args[0] for call in driver.serial_connection.write.call_args_list],
+            [call.args[0] for call in driver.transport.write.call_args_list],
             [
-                b"*CLS\n",
-                b"CONF:VOLT:AC\n",
-                b"VOLT:AC:RANG:AUTO ON\n",
-                b"*CLS\n",
-                b"CONF:RES\n",
-                b"RES:RANG:AUTO ON\n",
+                "*CLS",
+                "CONF:VOLT:AC",
+                "VOLT:AC:RANG:AUTO ON",
+                "READ?",
+                "*CLS",
+                "CONF:RES",
+                "RES:RANG:AUTO ON",
+                "READ?",
             ],
         )
         self.assertEqual(
@@ -160,8 +161,9 @@ class Agilent34401ADriverTests(SimpleTestCase):
     def test_measurement_rejects_invalid_response(self):
         """A malformed serial response becomes a measurement error."""
         driver = Agilent34401ADriver(port="/dev/ttyUSB0")
-        driver.transport = MagicMock()
-        driver.transport.get_data.return_value = "invalid"
+        driver.transport = MagicMock(spec=InstrumentTransport)
+        driver.transport.is_open = True
+        driver.transport.read.return_value = "invalid"
         driver._prepared_function = "dc_voltage"
 
         with self.assertRaises(MeasurementError):
@@ -170,19 +172,23 @@ class Agilent34401ADriverTests(SimpleTestCase):
     @patch("drivers.agilent_34401a.time.sleep")
     def test_prepare_dcv_uses_proven_serial_sequence(self, sleep):
         """DCV setup follows the timing proven by the original reader."""
-        driver = Agilent34401ADriver(port="/dev/ttyUSB0")
-        driver.serial_connection = MagicMock()
+        transport = MagicMock(spec=InstrumentTransport)
+        transport.is_open = True
+        driver = Agilent34401ADriver(
+            port="/dev/ttyUSB0",
+            transport=transport,
+        )
 
         driver._prepare_dc_voltage()
 
-        driver.serial_connection.reset_input_buffer.assert_called_once_with()
+        transport.reset_input_buffer.assert_called_once_with()
         self.assertEqual(
-            [call.args[0] for call in driver.serial_connection.write.call_args_list],
+            [call.args[0] for call in transport.write.call_args_list],
             [
-                b"SYSTem:REMote\n",
-                b"*CLS\n",
-                b"CONF:VOLT:DC\n",
-                b"VOLT:DC:RANG:AUTO ON\n",
+                "SYSTem:REMote",
+                "*CLS",
+                "CONF:VOLT:DC",
+                "VOLT:DC:RANG:AUTO ON",
             ],
         )
         self.assertEqual(

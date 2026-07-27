@@ -1,0 +1,142 @@
+{# Measurements domain template. #}
+{% extends "main/base.html" %}
+{% load static %}
+
+{% block title %}
+Single measurement
+{% endblock %}
+
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0">Single measurement</h2>
+    <div class="d-flex gap-2">
+        <button class="btn btn-outline-primary"
+                type="button"
+                data-csv-export
+                data-csv-target="measurement-single-table"
+                data-csv-filename="oil-single-measurements"
+                {% if not measurement %}disabled{% endif %}>
+            Download CSV
+        </button>
+        <a class="btn btn-outline-secondary"
+           href="{% url 'measurement_list' %}">
+            Back
+        </a>
+        <button class="btn btn-primary"
+                id="measurement-single-repeat"
+                type="submit"
+                form="measurement-single-form">
+            Measure
+        </button>
+    </div>
+</div>
+
+<form method="post"
+      class="{% if measurement_summary %}d-none{% endif %}"
+      id="measurement-single-form"
+      data-measure-url="{% url 'measurement_single_result' %}"
+      novalidate>
+    {% csrf_token %}
+
+    {% if form.non_field_errors %}
+        <div class="alert alert-danger" role="alert">
+            {{ form.non_field_errors }}
+        </div>
+    {% endif %}
+
+    <div class="row g-3 mb-3">
+        {% for field in form %}
+            {% if field.name != "notes" %}
+                <div class="col-md-6">
+                    <label class="form-label" for="{{ field.id_for_label }}">
+                        {{ field.label }}
+                    </label>
+                    {{ field }}
+                    {% for error in field.errors %}
+                        <div class="text-danger small">{{ error }}</div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endfor %}
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label" for="{{ form.notes.id_for_label }}">
+            {{ form.notes.label }}
+        </label>
+        {{ form.notes }}
+        {% for error in form.notes.errors %}
+            <div class="text-danger small">{{ error }}</div>
+        {% endfor %}
+    </div>
+
+</form>
+
+<div id="measurement-single-message" aria-live="polite"></div>
+
+<h3 class="h5 mb-3">Measurement result</h3>
+
+<div class="alert alert-info{% if not measurement_summary %} d-none{% endif %}"
+     id="measurement-single-summary"
+     role="status">
+    <div class="row g-2">
+        <div class="col-md-6">
+            <strong>Instrument:</strong>
+            <span id="single-summary-instrument">
+                {{ measurement_summary.instrument }}
+            </span>
+        </div>
+        <div class="col-md-6">
+            <strong>Measurement:</strong>
+            <span id="single-summary-measurement">
+                {{ measurement_summary.measurement }}
+            </span>
+        </div>
+    </div>
+    <div class="mt-2">
+        <strong>Notes:</strong>
+        <span id="single-summary-notes">
+            {{ measurement_summary.notes|default:"—" }}
+        </span>
+    </div>
+</div>
+
+<div class="table-responsive oil-measurement-table-scroll">
+    <table class="table table-striped table-hover align-middle"
+           id="measurement-single-table">
+        <thead>
+            <tr>
+                <th scope="col">Time</th>
+                <th scope="col">Instrument</th>
+                <th scope="col">Measurement</th>
+                <th scope="col" class="text-end">Value</th>
+                <th scope="col">Unit</th>
+            </tr>
+        </thead>
+        <tbody id="measurement-single-results">
+            {% if measurement %}
+                <tr>
+                    <td>{{ measurement.timestamp }}</td>
+                    <td>{{ measurement.instrument.name }}</td>
+                    <td>{{ measurement.parameter }}</td>
+                    <td class="text-end">{{ measurement.value }}</td>
+                    <td>{{ measurement.unit }}</td>
+                </tr>
+            {% else %}
+                <tr id="measurement-single-empty" data-csv-empty>
+                    <td colspan="5" class="text-center text-muted py-4">
+                        No single measurement has been recorded yet.
+                    </td>
+                </tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{% static 'main/js/measurement_csv.js' %}"></script>
+<script src="{% static 'main/js/measurement_single.js' %}"></script>
+{% endblock %}

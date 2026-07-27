@@ -13,13 +13,13 @@ from django.urls import reverse
 from drivers.base import FunctionConfiguration, MeasurementResult
 from drivers.exceptions import CommunicationError, ConfigurationError
 
-from .instrument_services import connect_instrument as run_connect
-from .instrument_services import disconnect_instrument as run_disconnect
-from .instrument_services import (
+from instruments.services import connect_instrument as run_connect
+from instruments.services import disconnect_instrument as run_disconnect
+from instruments.services import (
     test_instrument_dc_voltage_mode as run_dcv_mode_test,
 )
-from .instrument_services import test_instrument_driver as run_driver_test
-from .measurement_services import (
+from instruments.services import test_instrument_driver as run_driver_test
+from measurements.services import (
     iter_continuous_measurements,
     perform_measurement,
     perform_measurement_loop,
@@ -48,7 +48,7 @@ class AuthenticationTests(TestCase):
             ("instrument_list", "/instruments/"),
             ("instrument_create", "/instruments/add/"),
             ("measurement_list", "/measurements/"),
-            ("measurement_create", "/measurements/new/"),
+            ("measurement_create", "/measurements/single/"),
             ("measurement_continuous", "/measurements/continuous/"),
             ("measurement_loop", "/measurements/loop/"),
         )
@@ -401,7 +401,7 @@ class InstrumentInventoryTests(TestCase):
             content.index(">Status</div>"),
         )
 
-    @patch("main.views.ConnectionManager.connected_ids")
+    @patch("dashboard.views.ConnectionManager.connected_ids")
     def test_dashboard_online_count_uses_active_manager_connections(
         self,
         connected_ids,
@@ -414,7 +414,7 @@ class InstrumentInventoryTests(TestCase):
 
         self.assertEqual(response.context["online_instrument_count"], 1)
 
-    @patch("main.views.ConnectionManager.connected_ids")
+    @patch("dashboard.views.ConnectionManager.connected_ids")
     def test_online_instrument_is_not_also_counted_as_reachable(
         self,
         connected_ids,
@@ -458,7 +458,7 @@ class InstrumentInventoryTests(TestCase):
             reverse("instrument_driver", args=[instrument.pk]),
         )
 
-    @patch("main.views.ConnectionManager.connected_ids")
+    @patch("instruments.views.ConnectionManager.connected_ids")
     def test_instrument_list_offers_connect_when_disconnected(
         self,
         connected_ids,
@@ -481,7 +481,7 @@ class InstrumentInventoryTests(TestCase):
             reverse("instrument_disconnect", args=[instrument.pk]),
         )
 
-    @patch("main.views.ConnectionManager.connected_ids")
+    @patch("instruments.views.ConnectionManager.connected_ids")
     def test_instrument_list_offers_disconnect_when_online(
         self,
         connected_ids,
@@ -498,7 +498,7 @@ class InstrumentInventoryTests(TestCase):
             reverse("instrument_disconnect", args=[instrument.pk]),
         )
 
-    @patch("main.views.connect_instrument")
+    @patch("instruments.views.connect_instrument")
     def test_connect_action_uses_service_and_redirects(self, connect):
         """Connect POST delegates to the service and returns to the list."""
         instrument = self.create_instrument()
@@ -520,7 +520,7 @@ class InstrumentInventoryTests(TestCase):
         connect.assert_called_once()
         self.assertEqual(connect.call_args.args[0], instrument)
 
-    @patch("main.views.disconnect_instrument")
+    @patch("instruments.views.disconnect_instrument")
     def test_disconnect_action_uses_service_and_redirects(self, disconnect):
         """Disconnect POST delegates to the service and returns to the list."""
         instrument = self.create_instrument()
@@ -624,7 +624,7 @@ class InstrumentInventoryTests(TestCase):
         self.assertContains(response, "Autorange")
         self.assertContains(response, "<td>V</td>", html=True)
 
-    @patch("main.views.test_instrument_driver", return_value="KEYSIGHT,34461A")
+    @patch("instruments.views.test_instrument_driver", return_value="KEYSIGHT,34461A")
     def test_driver_test_uses_service_and_redirects(self, test_driver):
         """A POST runs the driver service and returns to its details page."""
         instrument = self.create_instrument()
@@ -650,7 +650,7 @@ class InstrumentInventoryTests(TestCase):
         self.assertEqual(response.status_code, 405)
 
     @patch(
-        "main.views.test_instrument_dc_voltage_mode",
+        "instruments.views.test_instrument_dc_voltage_mode",
         return_value=FunctionConfiguration(
             function="Voltage DC",
             autorange=True,
@@ -694,7 +694,7 @@ class InstrumentDriverServiceTests(TestCase):
             address="/dev/usbtmc0",
         )
 
-    @patch("main.instrument_services.ConnectionManager.session")
+    @patch("instruments.services.ConnectionManager.session")
     def test_successful_test_stores_identity_and_reachable_status(self, session):
         """A successful identification is persisted for later display."""
         instrument = self.create_instrument()
@@ -712,7 +712,7 @@ class InstrumentDriverServiceTests(TestCase):
         self.assertEqual(instrument.last_driver_error, "")
         session.assert_called_once_with(instrument)
 
-    @patch("main.instrument_services.ConnectionManager.session")
+    @patch("instruments.services.ConnectionManager.session")
     def test_failed_test_stores_error_status(self, session):
         """A driver failure is recorded and remains a domain error."""
         instrument = self.create_instrument()
@@ -728,7 +728,7 @@ class InstrumentDriverServiceTests(TestCase):
         self.assertEqual(instrument.last_driver_error, "Device timed out.")
         self.assertIsNotNone(instrument.last_driver_test_at)
 
-    @patch("main.instrument_services.ConnectionManager.session")
+    @patch("instruments.services.ConnectionManager.session")
     def test_dcv_mode_success_stores_reachable_status(self, session):
         """Verified DCV mode is recorded as a successful driver test."""
         instrument = self.create_instrument()
@@ -747,7 +747,7 @@ class InstrumentDriverServiceTests(TestCase):
         self.assertEqual(instrument.last_driver_error, "")
         self.assertIsNotNone(instrument.last_driver_test_at)
 
-    @patch("main.instrument_services.ConnectionManager.session")
+    @patch("instruments.services.ConnectionManager.session")
     def test_dcv_mode_mismatch_stores_error(self, session):
         """A read-back mismatch is persisted as a driver error."""
         instrument = self.create_instrument()
@@ -764,7 +764,7 @@ class InstrumentDriverServiceTests(TestCase):
         self.assertEqual(instrument.status, Instrument.Status.ERROR)
         self.assertIn("autorange", instrument.last_driver_error)
 
-    @patch("main.instrument_services.ConnectionManager.connect")
+    @patch("instruments.services.ConnectionManager.connect")
     def test_connect_stores_reachable_status(self, connect):
         """A retained connection records a successful operation."""
         instrument = self.create_instrument()
@@ -776,7 +776,7 @@ class InstrumentDriverServiceTests(TestCase):
         self.assertEqual(instrument.status, Instrument.Status.REACHABLE)
         self.assertEqual(instrument.last_driver_error, "")
 
-    @patch("main.instrument_services.ConnectionManager.connect")
+    @patch("instruments.services.ConnectionManager.connect")
     def test_connect_failure_stores_driver_error(self, connect):
         """A failed connection is visible in the persisted status."""
         instrument = self.create_instrument()
@@ -792,7 +792,7 @@ class InstrumentDriverServiceTests(TestCase):
             "Device is unavailable.",
         )
 
-    @patch("main.instrument_services.ConnectionManager.disconnect")
+    @patch("instruments.services.ConnectionManager.disconnect")
     def test_disconnect_closes_managed_connection(self, disconnect):
         """Disconnect delegates lifecycle cleanup to the manager."""
         instrument = self.create_instrument()
@@ -944,6 +944,17 @@ class MeasurementListTests(TestCase):
             "No single measurement has been recorded yet.",
         )
 
+    def test_single_measurement_uses_consistent_path(self):
+        """Single uses its workflow name and the old path no longer exists."""
+        self.assertEqual(
+            reverse("measurement_create"),
+            "/measurements/single/",
+        )
+
+        response = self.client.get("/measurements/new/")
+
+        self.assertEqual(response.status_code, 404)
+
     def test_measurement_list_links_to_loop_form(self):
         """The measurement list offers a separate Loop action."""
         response = self.client.get(reverse("measurement_list"))
@@ -976,7 +987,7 @@ class MeasurementListTests(TestCase):
         self.assertContains(response, "Stop")
         self.assertContains(response, "Measurement results")
 
-    @patch("main.views.iter_continuous_measurements")
+    @patch("measurements.views.iter_continuous_measurements")
     def test_continuous_stream_returns_live_ndjson(self, iterate):
         """The continuous endpoint streams every yielded stored reading."""
         first = Measurement.objects.create(
@@ -1018,7 +1029,7 @@ class MeasurementListTests(TestCase):
         "drivers.registry.DriverRegistry.capabilities",
         return_value={},
     )
-    @patch("main.views.perform_measurement")
+    @patch("measurements.views.perform_measurement")
     def test_unsupported_driver_function_is_rejected(
         self,
         perform,
@@ -1043,7 +1054,7 @@ class MeasurementListTests(TestCase):
 
     def test_continuous_stop_signals_owned_session(self):
         """Stop accepts an active session belonging to the signed-in user."""
-        from .continuous_sessions import ContinuousSessionRegistry
+        from measurements.sessions import ContinuousSessionRegistry
 
         session_id = str(uuid.uuid4())
         stop_event = ContinuousSessionRegistry.start(session_id, self.user.pk)
@@ -1078,7 +1089,7 @@ class MeasurementListTests(TestCase):
             "No loop measurements have been recorded yet.",
         )
 
-    @patch("main.views.perform_measurement")
+    @patch("measurements.views.perform_measurement")
     def test_valid_form_performs_measurement_and_displays_result(self, perform):
         """A valid request displays the measured value below the form."""
         perform.return_value = Measurement(
@@ -1115,7 +1126,7 @@ class MeasurementListTests(TestCase):
             notes="Input reference",
         )
 
-    @patch("main.views.perform_measurement")
+    @patch("measurements.views.perform_measurement")
     def test_single_result_endpoint_returns_live_table_row(self, perform):
         """Each Single request returns one result that JavaScript can append."""
         perform.return_value = Measurement(
@@ -1145,7 +1156,7 @@ class MeasurementListTests(TestCase):
             notes="Repeated reading",
         )
 
-    @patch("main.views.perform_measurement")
+    @patch("measurements.views.perform_measurement")
     def test_driver_error_is_displayed_without_redirect(self, perform):
         """Hardware errors remain on the measurement form."""
         perform.side_effect = CommunicationError("Device timed out.")
@@ -1165,7 +1176,7 @@ class MeasurementListTests(TestCase):
             "Measurement failed: Device timed out.",
         )
 
-    @patch("main.views.perform_measurement_loop")
+    @patch("measurements.views.perform_measurement_loop")
     def test_valid_loop_form_runs_series_and_displays_results(self, perform_loop):
         """Valid loop settings display the completed series below the form."""
         perform_loop.return_value = [
@@ -1221,7 +1232,7 @@ class MeasurementListTests(TestCase):
             "No loop measurements have been recorded yet.",
         )
 
-    @patch("main.views.perform_measurement_loop")
+    @patch("measurements.views.perform_measurement_loop")
     def test_loop_form_displays_hardware_error(self, perform_loop):
         """A failed series remains on its form with a useful error."""
         perform_loop.side_effect = CommunicationError("Device timed out.")
@@ -1266,7 +1277,7 @@ class MeasurementListTests(TestCase):
             "Ensure this value is greater than or equal to 0.1.",
         )
 
-    @patch("main.views.iter_measurement_loop")
+    @patch("measurements.views.iter_measurement_loop")
     def test_loop_stream_returns_each_result_as_ndjson(self, iterate):
         """The live endpoint streams one JSON record per measurement."""
         first = Measurement.objects.create(
@@ -1372,7 +1383,7 @@ class MeasurementServiceTests(TestCase):
             address="/dev/usbtmc0",
         )
 
-    @patch("main.measurement_services.ConnectionManager.temporary_session")
+    @patch("measurements.services.ConnectionManager.temporary_session")
     def test_dc_voltage_measurement_is_stored(self, session):
         """A normalized driver result is persisted with user notes."""
         driver = MagicMock()
@@ -1397,7 +1408,7 @@ class MeasurementServiceTests(TestCase):
         self.assertEqual(self.instrument.status, Instrument.Status.REACHABLE)
         self.assertEqual(self.instrument.last_driver_error, "")
 
-    @patch("main.measurement_services.ConnectionManager.temporary_session")
+    @patch("measurements.services.ConnectionManager.temporary_session")
     def test_ac_voltage_measurement_dispatches_to_driver(self, session):
         """AC voltage calls its driver method and stores volts."""
         driver = MagicMock()
@@ -1417,7 +1428,7 @@ class MeasurementServiceTests(TestCase):
         self.assertEqual(measurement.value, 2.75)
         self.assertEqual(measurement.unit, "V")
 
-    @patch("main.measurement_services.ConnectionManager.temporary_session")
+    @patch("measurements.services.ConnectionManager.temporary_session")
     def test_resistance_measurement_dispatches_to_driver(self, session):
         """Resistance calls its driver method and stores ohms."""
         driver = MagicMock()
@@ -1459,7 +1470,7 @@ class MeasurementServiceTests(TestCase):
         self.assertEqual(measurement.notes, "Hardware-free test")
         self.assertEqual(mock_instrument.status, Instrument.Status.REACHABLE)
 
-    @patch("main.measurement_services.ConnectionManager.temporary_session")
+    @patch("measurements.services.ConnectionManager.temporary_session")
     def test_measurement_failure_does_not_store_a_result(self, session):
         """A hardware failure records an error without creating a reading."""
         session.return_value.__enter__.side_effect = CommunicationError(
@@ -1477,8 +1488,8 @@ class MeasurementServiceTests(TestCase):
             "Device timed out.",
         )
 
-    @patch("main.measurement_services.time.sleep")
-    @patch("main.measurement_services.ConnectionManager.temporary_session")
+    @patch("measurements.services.time.sleep")
+    @patch("measurements.services.ConnectionManager.temporary_session")
     def test_loop_uses_one_session_and_requested_intervals(
         self,
         session,
@@ -1508,7 +1519,7 @@ class MeasurementServiceTests(TestCase):
         self.assertEqual(len(measurements), 3)
         self.assertEqual(Measurement.objects.count(), 3)
 
-    @patch("main.measurement_services.ConnectionManager.temporary_session")
+    @patch("measurements.services.ConnectionManager.temporary_session")
     def test_continuous_measurement_reuses_connection_until_stopped(
         self,
         session,

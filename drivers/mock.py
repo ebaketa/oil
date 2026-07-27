@@ -5,6 +5,7 @@ from itertools import cycle
 
 from .base import BaseInstrumentDriver, MeasurementCapability, MeasurementResult
 from .exceptions import CommunicationError, ConnectionError, MeasurementError
+from .transports import InstrumentTransport, MockTransport
 
 
 class MockInstrumentDriver(BaseInstrumentDriver):
@@ -35,6 +36,7 @@ class MockInstrumentDriver(BaseInstrumentDriver):
         address: str = "mock://default",
         *,
         readings: Iterable[float] | None = None,
+        transport: InstrumentTransport | None = None,
     ) -> None:
         """Configure a deterministic simulated instrument."""
         super().__init__()
@@ -48,21 +50,32 @@ class MockInstrumentDriver(BaseInstrumentDriver):
         self.address = address
         self.profile = address.removeprefix("mock://") or "default"
         self._readings = cycle(values)
-        self._commands: list[str] = []
+        self.transport = transport or MockTransport(
+            {
+                "*IDN?": self.IDENTITY,
+                "*OPC?": "1",
+                "SYST:ERR?": '+0,"No error"',
+                "FUNC?": '"VOLT:DC"',
+                "VOLT:DC:RANG:AUTO?": "1",
+            },
+        )
 
     @property
     def command_history(self) -> tuple[str, ...]:
         """Return commands received during the current driver lifetime."""
-        return tuple(self._commands)
+        history = getattr(self.transport, "command_history", ())
+        return tuple(history)
 
     def connect(self) -> None:
         """Open an in-memory connection to the simulated instrument."""
         if self.profile == "connection-error":
             raise ConnectionError("The mock instrument could not connect.")
+        self.transport.open()
         self.connected = True
 
     def disconnect(self) -> None:
         """Close the in-memory simulated connection."""
+        self.transport.close()
         self.connected = False
 
     def _require_connection(self) -> None:
@@ -73,21 +86,14 @@ class MockInstrumentDriver(BaseInstrumentDriver):
     def write(self, command: str) -> None:
         """Record one simulated SCPI command."""
         self._require_connection()
-        self._commands.append(command.rstrip())
+        self.transport.write(command)
 
     def query(self, command: str) -> str:
         """Record a query and return its deterministic SCPI response."""
-        self.write(command)
-        responses = {
-            "*IDN?": self.IDENTITY,
-            "*OPC?": "1",
-            "SYST:ERR?": '+0,"No error"',
-            "FUNC?": '"VOLT:DC"',
-            "VOLT:DC:RANG:AUTO?": "1",
-        }
+        self._require_connection()
         try:
-            return responses[command.rstrip()]
-        except KeyError as exc:
+            return self.transport.query(command)
+        except CommunicationError as exc:
             raise CommunicationError(
                 f"Unsupported mock query: {command}"
             ) from exc
