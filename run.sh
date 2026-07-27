@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly APP_DIR="/var/www/oil"
+readonly APP_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly PYTHON="$APP_DIR/.venv/bin/python"
 readonly MANAGE="$APP_DIR/manage.py"
-readonly SERVER_HOST="127.0.0.1"
-readonly SERVER_PORT="10000"
+readonly DOTENV="$APP_DIR/.env"
 
 trap 'echo "Error on line $LINENO: command failed." >&2' ERR
 
@@ -24,7 +23,16 @@ if [[ ! -f "$MANAGE" ]]; then
     exit 1
 fi
 
+dotenv_value() {
+    "$PYTHON" -c \
+        'import sys; from dotenv import dotenv_values; print(dotenv_values(sys.argv[1]).get(sys.argv[2], sys.argv[3]))' \
+        "$DOTENV" "$1" "$2"
+}
+
+readonly SERVER_HOST="${OIL_SERVER_HOST:-$(dotenv_value OIL_SERVER_HOST 127.0.0.1)}"
+readonly SERVER_PORT="${OIL_SERVER_PORT:-$(dotenv_value OIL_SERVER_PORT 10000)}"
+
 cd "$APP_DIR"
 
 echo "Starting Django server on $SERVER_HOST:$SERVER_PORT..."
-exec "$PYTHON" "$MANAGE" runserver "$SERVER_HOST:$SERVER_PORT"
+exec "$PYTHON" "$MANAGE" runserver --noreload "$SERVER_HOST:$SERVER_PORT"

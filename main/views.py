@@ -451,7 +451,10 @@ def instrument_driver(request, pk):
     return render(
         request,
         "main/instrument_driver.html",
-        {"instrument": instrument},
+        {
+            "instrument": instrument,
+            "capabilities": instrument.capabilities,
+        },
     )
 
 

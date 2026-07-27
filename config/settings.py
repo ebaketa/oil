@@ -10,22 +10,49 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load local development settings without overriding the process environment.
+load_dotenv(BASE_DIR / ".env", override=False)
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-g#ox65b&7+)#_09!5@zshfay(%*z9&1qemn$a@o8+=hv7xa2%r'
+SECRET_KEY = os.environ.get("OIL_SECRET_KEY")
+if not SECRET_KEY:
+    raise ImproperlyConfigured(
+        "OIL_SECRET_KEY must be set in the environment.",
+    )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get("OIL_DEBUG", "").lower() in {"1", "true", "yes", "on"}
 
-ALLOWED_HOSTS = ['*']
+allowed_hosts = os.environ.get("OIL_ALLOWED_HOSTS", "")
+if allowed_hosts:
+    ALLOWED_HOSTS = [
+        host.strip()
+        for host in allowed_hosts.split(",")
+        if host.strip()
+    ]
+    if not ALLOWED_HOSTS:
+        raise ImproperlyConfigured(
+            "OIL_ALLOWED_HOSTS must contain at least one host.",
+        )
+elif DEBUG:
+    ALLOWED_HOSTS = ["localhost", "127.0.0.1", "[::1]"]
+else:
+    raise ImproperlyConfigured(
+        "OIL_ALLOWED_HOSTS must be set in the environment.",
+    )
 
 
 # Application definition

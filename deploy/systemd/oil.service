@@ -6,8 +6,9 @@ After=network.target
 Type=simple
 User=ebaketa
 Group=ebaketa
-WorkingDirectory=/var/www/oil
-ExecStart=/var/www/oil/run.sh
+WorkingDirectory=/opt/oil
+EnvironmentFile=/etc/oil/oil.env
+ExecStart=/opt/oil/run.sh
 Restart=on-failure
 RestartSec=5
 

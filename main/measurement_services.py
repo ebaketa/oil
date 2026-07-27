@@ -12,9 +12,18 @@ from .models import Instrument, Measurement
 
 def _read_measurement(driver, measurement_type: str):
     """Execute one supported measurement against an active driver."""
-    if measurement_type == "dc_voltage":
-        return driver.measure_dc_voltage()
-    raise DriverError(f"Unsupported measurement type: {measurement_type}")
+    measurement_methods = {
+        "dc_voltage": driver.measure_dc_voltage,
+        "ac_voltage": driver.measure_ac_voltage,
+        "resistance": driver.measure_resistance,
+    }
+    try:
+        measurement_method = measurement_methods[measurement_type]
+    except KeyError as exc:
+        raise DriverError(
+            f"Unsupported measurement type: {measurement_type}"
+        ) from exc
+    return measurement_method()
 
 
 def _store_result(

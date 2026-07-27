@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly APP_DIR="/var/www/oil"
+readonly APP_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly PYTHON="$APP_DIR/.venv/bin/python"
 readonly CONFIG="$APP_DIR/mkdocs.yml"
-readonly SERVER_HOST="127.0.0.1"
-readonly SERVER_PORT="10001"
+readonly SERVER_HOST="${OIL_DOCS_HOST:-127.0.0.1}"
+readonly SERVER_PORT="${OIL_DOCS_PORT:-10001}"
 
 trap 'echo "Error on line $LINENO: command failed." >&2' ERR
 

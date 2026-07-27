@@ -2,9 +2,8 @@
 
 from django import forms
 from django.contrib.auth import get_user_model
-from django.db.models import TextChoices
 
-from .models import Instrument, UserPreference
+from .models import Instrument, MeasurementRun, UserPreference
 
 
 class ProfileForm(forms.ModelForm):
@@ -77,16 +76,11 @@ class InstrumentForm(forms.ModelForm):
 class MeasurementForm(forms.Form):
     """Select an instrument and the measurement it should perform."""
 
-    class Type(TextChoices):
-        """Measurement operations currently supported by every driver."""
-
-        DC_VOLTAGE = "dc_voltage", "DC voltage"
-
     instrument = forms.ModelChoiceField(
         queryset=Instrument.objects.none(),
     )
     measurement_type = forms.ChoiceField(
-        choices=Type.choices,
+        choices=MeasurementRun.Function.choices,
         label="Measurement",
     )
     notes = forms.CharField(
@@ -105,6 +99,24 @@ class MeasurementForm(forms.Form):
                 forms.Select,
             ) else "form-control"
             field.widget.attrs["class"] = css_class
+
+    def clean(self):
+        """Reject functions unsupported by the selected instrument driver."""
+        cleaned_data = super().clean()
+        instrument = cleaned_data.get("instrument")
+        measurement_type = cleaned_data.get("measurement_type")
+
+        if (
+            instrument is not None
+            and measurement_type
+            and not instrument.supports_function(measurement_type)
+        ):
+            self.add_error(
+                "measurement_type",
+                "The selected instrument does not support this measurement.",
+            )
+        return cleaned_data
+
 
 class LoopMeasurementForm(MeasurementForm):
     """Configure a finite sequence of measurements."""

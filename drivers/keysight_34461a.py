@@ -3,12 +3,30 @@
 import time
 from typing import BinaryIO, Callable
 
-from .base import BaseInstrumentDriver, MeasurementResult
+from .base import BaseInstrumentDriver, MeasurementCapability, MeasurementResult
 from .exceptions import CommunicationError, ConnectionError, MeasurementError
 
 
 class Keysight34461ADriver(BaseInstrumentDriver):
     """Communicate with a Keysight 34461A through a USBTMC device node."""
+
+    CAPABILITIES = {
+        "dc_voltage": MeasurementCapability(
+            label="DC voltage",
+            unit="V",
+            autorange=True,
+        ),
+        "ac_voltage": MeasurementCapability(
+            label="AC voltage",
+            unit="V",
+            autorange=True,
+        ),
+        "resistance": MeasurementCapability(
+            label="Resistance",
+            unit="Ω",
+            autorange=True,
+        ),
+    }
 
     def __init__(
         self,
@@ -26,6 +44,7 @@ class Keysight34461ADriver(BaseInstrumentDriver):
         self._open_device = open_device
         self.device: BinaryIO | None = None
         self._dc_voltage_prepared = False
+        self._prepared_function: str | None = None
 
     def connect(self) -> None:
         """Open the USBTMC device without changing instrument settings."""
@@ -58,6 +77,7 @@ class Keysight34461ADriver(BaseInstrumentDriver):
         device, self.device = self.device, None
         self.connected = False
         self._dc_voltage_prepared = False
+        self._prepared_function = None
         if device is not None and not device.closed:
             device.close()
 
@@ -96,22 +116,61 @@ class Keysight34461ADriver(BaseInstrumentDriver):
 
     def measure_dc_voltage(self) -> MeasurementResult:
         """Measure DC voltage in autorange and return a normalized result."""
+        return self._measure_function(
+            function="dc_voltage",
+            configure_command="CONF:VOLT:DC",
+            autorange_command="VOLT:DC:RANG:AUTO ON",
+            parameter="Voltage DC",
+            unit="V",
+        )
+
+    def measure_ac_voltage(self) -> MeasurementResult:
+        """Measure AC voltage in autorange and return a normalized result."""
+        return self._measure_function(
+            function="ac_voltage",
+            configure_command="CONF:VOLT:AC",
+            autorange_command="VOLT:AC:RANG:AUTO ON",
+            parameter="Voltage AC",
+            unit="V",
+        )
+
+    def measure_resistance(self) -> MeasurementResult:
+        """Measure two-wire resistance in autorange."""
+        return self._measure_function(
+            function="resistance",
+            configure_command="CONF:RES",
+            autorange_command="RES:RANG:AUTO ON",
+            parameter="Resistance",
+            unit="Ω",
+        )
+
+    def _measure_function(
+        self,
+        *,
+        function: str,
+        configure_command: str,
+        autorange_command: str,
+        parameter: str,
+        unit: str,
+    ) -> MeasurementResult:
+        """Configure one function when needed and return its next reading."""
         try:
-            if not self._dc_voltage_prepared:
+            if self._prepared_function != function:
                 self.write("*CLS")
                 time.sleep(0.5)
-                self.write("CONF:VOLT:DC")
+                self.write(configure_command)
                 time.sleep(0.1)
-                self.write("VOLT:DC:RANG:AUTO ON")
+                self.write(autorange_command)
                 time.sleep(0.1)
-                self._dc_voltage_prepared = True
+                self._prepared_function = function
+                self._dc_voltage_prepared = function == "dc_voltage"
 
             self.write("READ?")
             time.sleep(0.5)
             value = float(self.read_response())
         except (ValueError, CommunicationError) as exc:
             raise MeasurementError(
-                "The Keysight 34461A did not return a valid DC voltage."
+                f"The Keysight 34461A did not return a valid {parameter}."
             ) from exc
 
-        return MeasurementResult(parameter="Voltage DC", value=value, unit="V")
+        return MeasurementResult(parameter=parameter, value=value, unit=unit)

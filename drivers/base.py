@@ -2,8 +2,13 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from types import MappingProxyType
+from typing import TYPE_CHECKING, ClassVar, Mapping, Self
 
 from .exceptions import CommunicationError, ConfigurationError
+
+if TYPE_CHECKING:
+    from main.models import Instrument
 
 
 @dataclass(frozen=True)
@@ -23,8 +28,31 @@ class FunctionConfiguration:
     autorange: bool
 
 
+@dataclass(frozen=True)
+class MeasurementCapability:
+    """Describe one measurement function exposed by a driver."""
+
+    label: str
+    unit: str
+    autorange: bool = False
+    ranges: tuple[float, ...] = ()
+    nplc: tuple[float, ...] = ()
+
+
 class BaseInstrumentDriver(ABC):
     """Define the lifecycle and operations shared by instrument drivers."""
+
+    CAPABILITIES: ClassVar[Mapping[str, MeasurementCapability]] = {}
+
+    @classmethod
+    def capabilities(cls) -> Mapping[str, MeasurementCapability]:
+        """Return immutable measurement capabilities without connecting."""
+        return MappingProxyType(dict(cls.CAPABILITIES))
+
+    @classmethod
+    def from_instrument(cls, instrument: "Instrument") -> Self:
+        """Create a driver from a stored instrument inventory record."""
+        return cls(instrument.address)
 
     def __init__(self) -> None:
         """Create a disconnected driver."""
@@ -138,3 +166,11 @@ class BaseInstrumentDriver(ABC):
     @abstractmethod
     def measure_dc_voltage(self) -> MeasurementResult:
         """Measure DC voltage and return a normalized result."""
+
+    @abstractmethod
+    def measure_ac_voltage(self) -> MeasurementResult:
+        """Measure AC voltage and return a normalized result."""
+
+    @abstractmethod
+    def measure_resistance(self) -> MeasurementResult:
+        """Measure two-wire resistance and return a normalized result."""

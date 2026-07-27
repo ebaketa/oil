@@ -4,6 +4,8 @@ from threading import Event
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from django.db.models.deletion import ProtectedError
 from django.test import TestCase
 from django.utils import timezone
 from django.urls import reverse
@@ -22,7 +24,7 @@ from .measurement_services import (
     perform_measurement,
     perform_measurement_loop,
 )
-from .models import Instrument, Measurement, UserPreference
+from .models import Instrument, Measurement, MeasurementRun, UserPreference
 
 
 class AuthenticationTests(TestCase):
@@ -328,6 +330,26 @@ class InstrumentInventoryTests(TestCase):
         self.assertContains(instrument_list, "/dev/usbtmc0")
         self.assertEqual(instrument_list.context["instrument_count"], 1)
 
+    def test_user_can_add_mock_instrument(self):
+        """The inventory form exposes the hardware-free mock driver."""
+        response = self.client.post(
+            reverse("instrument_create"),
+            {
+                "name": "Simulated DMM",
+                "manufacturer": "OIL",
+                "model_name": "Mock DMM",
+                "serial_number": "",
+                "driver": Instrument.Driver.MOCK,
+                "address": "mock://default",
+                "description": "Development instrument",
+            },
+        )
+
+        self.assertRedirects(response, reverse("instrument_list"))
+        instrument = Instrument.objects.get()
+        self.assertEqual(instrument.driver, Instrument.Driver.MOCK)
+        self.assertEqual(instrument.address, "mock://default")
+
     def test_invalid_instrument_is_not_created(self):
         """Required fields are validated before an instrument is stored."""
         response = self.client.post(
@@ -597,6 +619,10 @@ class InstrumentInventoryTests(TestCase):
             response,
             reverse("instrument_driver_test_dcv", args=[instrument.pk]),
         )
+        self.assertContains(response, "Supported measurement functions")
+        self.assertContains(response, "DC voltage")
+        self.assertContains(response, "Autorange")
+        self.assertContains(response, "<td>V</td>", html=True)
 
     @patch("main.views.test_instrument_driver", return_value="KEYSIGHT,34461A")
     def test_driver_test_uses_service_and_redirects(self, test_driver):
@@ -776,6 +802,97 @@ class InstrumentDriverServiceTests(TestCase):
         disconnect.assert_called_once_with(instrument)
 
 
+class MeasurementRunModelTests(TestCase):
+    """Test persistent measurement series metadata and relationships."""
+
+    def setUp(self):
+        """Create a user and instrument used by run model tests."""
+        self.user = get_user_model().objects.create_user(
+            username="run-user",
+            password="test-password",
+        )
+        self.instrument = Instrument.objects.create(
+            name="Run DMM",
+            manufacturer="Keysight",
+            model_name="34461A",
+            driver=Instrument.Driver.KEYSIGHT_34461A,
+            address="/dev/usbtmc0",
+        )
+
+    def create_run(self, **overrides):
+        """Create a representative loop run."""
+        values = {
+            "user": self.user,
+            "instrument": self.instrument,
+            "function": MeasurementRun.Function.DC_VOLTAGE,
+            "mode": MeasurementRun.Mode.LOOP,
+            "interval": 0.5,
+            "requested_count": 10,
+            "notes": "Stability run",
+        }
+        values.update(overrides)
+        return MeasurementRun.objects.create(**values)
+
+    def test_run_stores_configuration_and_pending_lifecycle(self):
+        """A new run records its owner, settings, and pending state."""
+        run = self.create_run()
+
+        self.assertEqual(run.user, self.user)
+        self.assertEqual(run.instrument, self.instrument)
+        self.assertEqual(run.function, MeasurementRun.Function.DC_VOLTAGE)
+        self.assertEqual(run.mode, MeasurementRun.Mode.LOOP)
+        self.assertEqual(run.interval, 0.5)
+        self.assertEqual(run.requested_count, 10)
+        self.assertEqual(run.status, MeasurementRun.Status.PENDING)
+        self.assertIsNone(run.started_at)
+        self.assertIsNone(run.stopped_at)
+        self.assertEqual(str(run), "Loop DC voltage on Run DMM")
+
+    def test_measurements_can_belong_to_a_run(self):
+        """Readings expose their run through both relationship directions."""
+        run = self.create_run()
+        measurement = Measurement.objects.create(
+            run=run,
+            instrument=self.instrument,
+            parameter="Voltage DC",
+            value=1.234,
+            unit="V",
+        )
+
+        self.assertEqual(measurement.run, run)
+        self.assertEqual(list(run.measurements.all()), [measurement])
+
+    def test_measurement_protects_its_run_from_deletion(self):
+        """A run with stored readings cannot be deleted accidentally."""
+        run = self.create_run()
+        Measurement.objects.create(
+            run=run,
+            instrument=self.instrument,
+            parameter="Voltage DC",
+            value=1.234,
+            unit="V",
+        )
+
+        with self.assertRaises(ProtectedError):
+            run.delete()
+
+    def test_deleted_user_does_not_delete_run_history(self):
+        """Deleting an account preserves its historical measurement runs."""
+        run = self.create_run()
+
+        self.user.delete()
+        run.refresh_from_db()
+
+        self.assertIsNone(run.user)
+
+    def test_interval_below_supported_minimum_is_rejected(self):
+        """Run validation rejects intervals shorter than 0.1 seconds."""
+        run = self.create_run(interval=0.05)
+
+        with self.assertRaises(ValidationError):
+            run.full_clean()
+
+
 class MeasurementListTests(TestCase):
     """Test measurement storage, listing, and Dashboard summary."""
 
@@ -807,7 +924,7 @@ class MeasurementListTests(TestCase):
         self.assertEqual(response.context["measurement_count"], 0)
 
     def test_new_measurement_page_offers_supported_choices(self):
-        """The form allows selection of an instrument and DC voltage."""
+        """The form offers every function supported by the selected driver."""
         response = self.client.get(reverse("measurement_create"))
 
         self.assertEqual(response.status_code, 200)
@@ -818,6 +935,8 @@ class MeasurementListTests(TestCase):
         )
         self.assertContains(response, "Reference DMM")
         self.assertContains(response, "DC voltage")
+        self.assertContains(response, "AC voltage")
+        self.assertContains(response, "Resistance")
         self.assertContains(response, "Measure")
         self.assertContains(response, "Measurement result")
         self.assertContains(
@@ -894,6 +1013,33 @@ class MeasurementListTests(TestCase):
         self.assertEqual([record["index"] for record in records], [1, 2])
         self.assertEqual([record["value"] for record in records], [2.0, 2.1])
         iterate.assert_called_once()
+
+    @patch(
+        "drivers.registry.DriverRegistry.capabilities",
+        return_value={},
+    )
+    @patch("main.views.perform_measurement")
+    def test_unsupported_driver_function_is_rejected(
+        self,
+        perform,
+        _capabilities,
+    ):
+        """The backend rejects a function absent from driver capabilities."""
+        response = self.client.post(
+            reverse("measurement_single_result"),
+            {
+                "instrument": self.instrument.pk,
+                "measurement_type": "dc_voltage",
+                "notes": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(
+            "does not support this measurement",
+            response.json()["errors"]["measurement_type"][0]["message"],
+        )
+        perform.assert_not_called()
 
     def test_continuous_stop_signals_owned_session(self):
         """Stop accepts an active session belonging to the signed-in user."""
@@ -1250,6 +1396,68 @@ class MeasurementServiceTests(TestCase):
         self.assertEqual(measurement.notes, "Reference input")
         self.assertEqual(self.instrument.status, Instrument.Status.REACHABLE)
         self.assertEqual(self.instrument.last_driver_error, "")
+
+    @patch("main.measurement_services.ConnectionManager.temporary_session")
+    def test_ac_voltage_measurement_dispatches_to_driver(self, session):
+        """AC voltage calls its driver method and stores volts."""
+        driver = MagicMock()
+        driver.measure_ac_voltage.return_value = MeasurementResult(
+            parameter="Voltage AC",
+            value=2.75,
+            unit="V",
+        )
+        session.return_value.__enter__.return_value = driver
+
+        measurement = perform_measurement(self.instrument, "ac_voltage")
+
+        driver.measure_ac_voltage.assert_called_once_with()
+        driver.measure_dc_voltage.assert_not_called()
+        driver.measure_resistance.assert_not_called()
+        self.assertEqual(measurement.parameter, "Voltage AC")
+        self.assertEqual(measurement.value, 2.75)
+        self.assertEqual(measurement.unit, "V")
+
+    @patch("main.measurement_services.ConnectionManager.temporary_session")
+    def test_resistance_measurement_dispatches_to_driver(self, session):
+        """Resistance calls its driver method and stores ohms."""
+        driver = MagicMock()
+        driver.measure_resistance.return_value = MeasurementResult(
+            parameter="Resistance",
+            value=1000,
+            unit="Ω",
+        )
+        session.return_value.__enter__.return_value = driver
+
+        measurement = perform_measurement(self.instrument, "resistance")
+
+        driver.measure_resistance.assert_called_once_with()
+        driver.measure_dc_voltage.assert_not_called()
+        driver.measure_ac_voltage.assert_not_called()
+        self.assertEqual(measurement.parameter, "Resistance")
+        self.assertEqual(measurement.value, 1000)
+        self.assertEqual(measurement.unit, "Ω")
+
+    def test_mock_driver_runs_complete_measurement_service_without_hardware(self):
+        """The real service path stores a deterministic simulated reading."""
+        mock_instrument = Instrument.objects.create(
+            name="Simulated DMM",
+            manufacturer="OIL",
+            model_name="Mock DMM",
+            driver=Instrument.Driver.MOCK,
+            address="mock://default",
+        )
+
+        measurement = perform_measurement(
+            mock_instrument,
+            "dc_voltage",
+            notes="Hardware-free test",
+        )
+
+        mock_instrument.refresh_from_db()
+        self.assertEqual(measurement.value, 1.0)
+        self.assertEqual(measurement.unit, "V")
+        self.assertEqual(measurement.notes, "Hardware-free test")
+        self.assertEqual(mock_instrument.status, Instrument.Status.REACHABLE)
 
     @patch("main.measurement_services.ConnectionManager.temporary_session")
     def test_measurement_failure_does_not_store_a_result(self, session):

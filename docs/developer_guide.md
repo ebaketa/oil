@@ -26,6 +26,21 @@ def read_measurement(instrument_id: int) -> float:
     """
 ```
 
+## Adding an instrument driver
+
+New instrument drivers must inherit from `BaseInstrumentDriver` and accept the
+stored instrument address as their first constructor argument. Import the class
+from `drivers/__init__.py` and register its persistent inventory name with
+`DriverRegistry.register()`. Do not add model-specific conditionals to
+`create_driver()`. Define the class-level `CAPABILITIES` mapping with a
+`MeasurementCapability` entry for every function the implementation supports;
+capabilities must describe only behavior implemented and verified by the
+driver.
+
+For hardware-free development, add an instrument with driver `Mock instrument`
+and address `mock://default`. Use `mock://timeout` to simulate a measurement
+timeout or `mock://connection-error` to simulate unavailable hardware.
+
 ## Validation
 
 Run the application and documentation checks before committing:
@@ -64,7 +79,7 @@ systemctl status oil
 journalctl -u oil -f
 ```
 
-This unit runs Django's development server on `127.0.0.1:10000`. It is
+This unit runs Django's development server on `127.0.0.1:10000` by default. It is
 intended for local development and must not be used as a production web
 server.
 

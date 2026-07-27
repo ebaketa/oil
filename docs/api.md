@@ -11,6 +11,11 @@ This reference is generated from source-code docstrings with
 
 ## Instrument drivers
 
+::: drivers.registry
+    options:
+      show_root_heading: true
+      members_order: source
+
 ::: drivers.base
     options:
       show_root_heading: true
@@ -22,6 +27,11 @@ This reference is generated from source-code docstrings with
       members_order: source
 
 ::: drivers.keysight_34461a
+    options:
+      show_root_heading: true
+      members_order: source
+
+::: drivers.mock
     options:
       show_root_heading: true
       members_order: source

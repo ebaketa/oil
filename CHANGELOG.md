@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5] - 2026-07-27
+
+### Added
+
+- Added the `MeasurementRun` model for persistent Single, Continuous, and Loop
+  configuration and lifecycle metadata, plus an optional transitional
+  relationship from each `Measurement`.
+- Added a central `DriverRegistry` with protected name registration and shared
+  inventory-based driver construction, removing model-specific branching from
+  the driver factory.
+- Added a deterministic Mock instrument driver for development, demonstrations,
+  complete measurement-service tests, and simulated timeout or connection
+  failures without physical hardware.
+- Added immutable driver capability metadata exposed through the registry and
+  instrument model, server-side function validation, and a supported-functions
+  table on each driver details page.
+- Added autoranged AC voltage and two-wire resistance measurements to the
+  Agilent 34401A, Keysight 34461A, and Mock drivers, including Single,
+  Continuous, and Loop workflow support.
+
+### Security
+
+- Removed the committed Django secret key. Deployments must now provide a
+  private `OIL_SECRET_KEY` environment variable.
+- Disabled Django debug output by default. Local development must now opt in
+  with `OIL_DEBUG=True`.
+- Replaced the wildcard Django host policy with an explicit, required
+  `OIL_ALLOWED_HOSTS` deployment setting.
+- Removed the private deployment IP address from tracked scripts and
+  documentation; server bind addresses are now configured through environment
+  variables and default to localhost.
+- Added a safe `.env.example` template and automatic local `.env` loading
+  without overriding deployment environment variables.
+- Removed the real installation path from tracked files. Launcher scripts now
+  discover their own directory, and systemd examples use `/opt/oil`.
+
 ## [0.0.4] - 2026-07-26
 
 ### Added

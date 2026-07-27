@@ -15,6 +15,8 @@ from .exceptions import (
 )
 from .factory import create_driver
 from .keysight_34461a import Keysight34461ADriver
+from .mock import MockInstrumentDriver
+from .registry import DriverRegistry
 
 
 class Agilent34401ADriverTests(SimpleTestCase):
@@ -113,6 +115,7 @@ class Agilent34401ADriverTests(SimpleTestCase):
         driver = Agilent34401ADriver(port="/dev/ttyUSB0")
         driver.transport = MagicMock()
         driver.transport.get_data.return_value = "1.2345"
+        driver._prepared_function = "dc_voltage"
 
         result = driver.measure_dc_voltage()
 
@@ -122,11 +125,44 @@ class Agilent34401ADriverTests(SimpleTestCase):
             MeasurementResult(parameter="Voltage DC", value=1.2345, unit="V"),
         )
 
+    @patch("drivers.agilent_34401a.time.sleep")
+    def test_ac_voltage_and_resistance_reconfigure_serial_function(self, _sleep):
+        """Function changes use the documented SCPI autorange sequences."""
+        driver = Agilent34401ADriver(port="/dev/ttyUSB0")
+        driver.serial_connection = MagicMock()
+        driver.transport = MagicMock()
+        driver.transport.get_data.side_effect = ("2.5", "1000")
+        driver._prepared_function = "dc_voltage"
+
+        ac_result = driver.measure_ac_voltage()
+        resistance_result = driver.measure_resistance()
+
+        self.assertEqual(
+            [call.args[0] for call in driver.serial_connection.write.call_args_list],
+            [
+                b"*CLS\n",
+                b"CONF:VOLT:AC\n",
+                b"VOLT:AC:RANG:AUTO ON\n",
+                b"*CLS\n",
+                b"CONF:RES\n",
+                b"RES:RANG:AUTO ON\n",
+            ],
+        )
+        self.assertEqual(
+            ac_result,
+            MeasurementResult(parameter="Voltage AC", value=2.5, unit="V"),
+        )
+        self.assertEqual(
+            resistance_result,
+            MeasurementResult(parameter="Resistance", value=1000.0, unit="Ω"),
+        )
+
     def test_measurement_rejects_invalid_response(self):
         """A malformed serial response becomes a measurement error."""
         driver = Agilent34401ADriver(port="/dev/ttyUSB0")
         driver.transport = MagicMock()
         driver.transport.get_data.return_value = "invalid"
+        driver._prepared_function = "dc_voltage"
 
         with self.assertRaises(MeasurementError):
             driver.measure_dc_voltage()
@@ -301,6 +337,40 @@ class Keysight34461ADriverTests(SimpleTestCase):
         self.assertEqual(first.value, 1.0)
         self.assertEqual(second.value, 2.0)
 
+    @patch("drivers.keysight_34461a.time.sleep")
+    def test_ac_voltage_and_resistance_use_autorange_commands(self, _sleep):
+        """AC voltage and resistance return normalized autoranged results."""
+        driver = Keysight34461ADriver()
+
+        with (
+            patch.object(driver, "write") as write,
+            patch.object(driver, "read_response", side_effect=["3.5", "470"]),
+        ):
+            ac_result = driver.measure_ac_voltage()
+            resistance_result = driver.measure_resistance()
+
+        self.assertEqual(
+            [call.args[0] for call in write.call_args_list],
+            [
+                "*CLS",
+                "CONF:VOLT:AC",
+                "VOLT:AC:RANG:AUTO ON",
+                "READ?",
+                "*CLS",
+                "CONF:RES",
+                "RES:RANG:AUTO ON",
+                "READ?",
+            ],
+        )
+        self.assertEqual(
+            ac_result,
+            MeasurementResult(parameter="Voltage AC", value=3.5, unit="V"),
+        )
+        self.assertEqual(
+            resistance_result,
+            MeasurementResult(parameter="Resistance", value=470.0, unit="Ω"),
+        )
+
     def test_execute_confirms_completion_and_no_scpi_error(self):
         """A command succeeds only after OPC and error-queue confirmation."""
         driver = Keysight34461ADriver()
@@ -438,3 +508,162 @@ class DriverFactoryTests(SimpleTestCase):
 
         self.assertIsInstance(driver, Keysight34461ADriver)
         self.assertEqual(driver.device_path, "/dev/usbtmc1")
+
+    def test_factory_rejects_an_unregistered_driver_name(self):
+        """Unknown inventory names retain the existing factory error."""
+        with self.assertRaisesMessage(
+            ValueError,
+            "Unsupported instrument driver: missing",
+        ):
+            create_driver(
+                SimpleNamespace(driver="missing", address="/dev/missing"),
+            )
+
+    def test_factory_creates_mock_driver_with_profile_address(self):
+        """Mock inventory configuration maps its address to a simulation."""
+        driver = create_driver(
+            SimpleNamespace(
+                driver="mock",
+                address="mock://default",
+            ),
+        )
+
+        self.assertIsInstance(driver, MockInstrumentDriver)
+        self.assertEqual(driver.address, "mock://default")
+
+
+class DriverRegistryTests(SimpleTestCase):
+    """Verify driver discovery and extension through the central registry."""
+
+    def tearDown(self):
+        """Remove the test-only alias without changing built-in drivers."""
+        DriverRegistry.unregister("test_keysight")
+
+    def test_builtin_drivers_are_registered(self):
+        """The registry exposes both persistent built-in driver names."""
+        self.assertEqual(
+            DriverRegistry.names(),
+            ("agilent_34401a", "keysight_34461a", "mock"),
+        )
+
+    def test_registered_driver_can_be_created_without_factory_changes(self):
+        """A new registry entry immediately participates in driver creation."""
+        DriverRegistry.register("test_keysight", Keysight34461ADriver)
+
+        driver = create_driver(
+            SimpleNamespace(
+                driver="test_keysight",
+                address="/dev/usbtmc9",
+            ),
+        )
+
+        self.assertIsInstance(driver, Keysight34461ADriver)
+        self.assertEqual(driver.device_path, "/dev/usbtmc9")
+
+    def test_duplicate_name_cannot_replace_a_registered_driver(self):
+        """A different implementation cannot silently hijack a driver name."""
+        with self.assertRaisesMessage(
+            ValueError,
+            "Driver name is already registered: agilent_34401a",
+        ):
+            DriverRegistry.register(
+                "agilent_34401a",
+                Keysight34461ADriver,
+            )
+
+    def test_capabilities_are_available_without_creating_a_driver(self):
+        """Registry metadata can build forms without touching hardware."""
+        capabilities = DriverRegistry.capabilities("mock")
+
+        self.assertEqual(
+            tuple(capabilities),
+            ("dc_voltage", "ac_voltage", "resistance"),
+        )
+        capability = capabilities["dc_voltage"]
+        self.assertEqual(capability.label, "DC voltage")
+        self.assertEqual(capability.unit, "V")
+        self.assertTrue(capability.autorange)
+
+        with self.assertRaises(TypeError):
+            capabilities["other"] = capability
+
+
+class MockInstrumentDriverTests(SimpleTestCase):
+    """Verify deterministic simulated instrument behavior."""
+
+    def test_context_manager_identifies_and_disconnects(self):
+        """The mock follows the same connection lifecycle as real drivers."""
+        driver = MockInstrumentDriver()
+
+        with driver:
+            identity = driver.identify()
+            self.assertTrue(driver.connected)
+
+        self.assertEqual(identity, MockInstrumentDriver.IDENTITY)
+        self.assertFalse(driver.connected)
+        self.assertEqual(driver.command_history, ("*IDN?",))
+
+    def test_measurements_cycle_through_configured_values(self):
+        """Repeated readings deterministically cycle through test values."""
+        driver = MockInstrumentDriver(readings=(1.25, 2.5))
+
+        with driver:
+            values = [
+                driver.measure_dc_voltage().value,
+                driver.measure_dc_voltage().value,
+                driver.measure_dc_voltage().value,
+            ]
+
+        self.assertEqual(values, [1.25, 2.5, 1.25])
+
+    def test_ac_voltage_and_resistance_have_normalized_units(self):
+        """The mock exposes both new functions through the shared contract."""
+        driver = MockInstrumentDriver(readings=(2.5, 1000))
+
+        with driver:
+            ac_result = driver.measure_ac_voltage()
+            resistance_result = driver.measure_resistance()
+
+        self.assertEqual(
+            ac_result,
+            MeasurementResult(parameter="Voltage AC", value=2.5, unit="V"),
+        )
+        self.assertEqual(
+            resistance_result,
+            MeasurementResult(parameter="Resistance", value=1000.0, unit="Ω"),
+        )
+
+    def test_dcv_auto_configuration_uses_standard_scpi_contract(self):
+        """The mock supports the shared DC voltage configuration checks."""
+        driver = MockInstrumentDriver()
+
+        with driver:
+            configuration = driver.configure_dc_voltage_auto()
+
+        self.assertEqual(
+            configuration,
+            FunctionConfiguration(function="Voltage DC", autorange=True),
+        )
+
+    def test_timeout_profile_simulates_measurement_failure(self):
+        """The timeout profile raises a domain measurement error."""
+        driver = MockInstrumentDriver("mock://timeout")
+
+        with driver:
+            with self.assertRaisesMessage(
+                MeasurementError,
+                "The mock measurement timed out.",
+            ):
+                driver.measure_dc_voltage()
+
+    def test_connection_error_profile_simulates_unavailable_hardware(self):
+        """The connection-error profile fails before becoming connected."""
+        driver = MockInstrumentDriver("mock://connection-error")
+
+        with self.assertRaisesMessage(
+            ConnectionError,
+            "The mock instrument could not connect.",
+        ):
+            driver.connect()
+
+        self.assertFalse(driver.connected)

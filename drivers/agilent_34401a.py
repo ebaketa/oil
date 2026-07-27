@@ -3,13 +3,36 @@
 import time
 from typing import Any
 
-from .base import BaseInstrumentDriver, FunctionConfiguration, MeasurementResult
+from .base import (
+    BaseInstrumentDriver,
+    FunctionConfiguration,
+    MeasurementCapability,
+    MeasurementResult,
+)
 from .agilent_34401a_transport import Agilent34401ATransport
 from .exceptions import CommunicationError, ConnectionError, MeasurementError
 
 
 class Agilent34401ADriver(BaseInstrumentDriver):
     """Communicate with an Agilent 34401A through a serial/FTDI adapter."""
+
+    CAPABILITIES = {
+        "dc_voltage": MeasurementCapability(
+            label="DC voltage",
+            unit="V",
+            autorange=True,
+        ),
+        "ac_voltage": MeasurementCapability(
+            label="AC voltage",
+            unit="V",
+            autorange=True,
+        ),
+        "resistance": MeasurementCapability(
+            label="Resistance",
+            unit="Ω",
+            autorange=True,
+        ),
+    }
 
     def __init__(
         self,
@@ -35,6 +58,7 @@ class Agilent34401ADriver(BaseInstrumentDriver):
         self.serial_connection: Any | None = None
         self.transport: Agilent34401ATransport | None = None
         self._dc_voltage_prepared = False
+        self._prepared_function: str | None = None
 
     def _resolve_port(self) -> str:
         """Return the configured port or discover it by USB serial number."""
@@ -61,6 +85,7 @@ class Agilent34401ADriver(BaseInstrumentDriver):
             self.serial_connection = self.transport.ser
             self.connected = True
             self._dc_voltage_prepared = True
+            self._prepared_function = "dc_voltage"
         except (OSError, CommunicationError) as exc:
             self._close_connection()
             raise ConnectionError("Could not initialize the Agilent 34401A.") from exc
@@ -73,6 +98,7 @@ class Agilent34401ADriver(BaseInstrumentDriver):
             self.serial_connection = None
             self.connected = False
             self._dc_voltage_prepared = False
+            self._prepared_function = None
         else:
             self._close_connection()
 
@@ -82,6 +108,7 @@ class Agilent34401ADriver(BaseInstrumentDriver):
         self.transport = None
         self.connected = False
         self._dc_voltage_prepared = False
+        self._prepared_function = None
         if connection is not None and connection.is_open:
             connection.close()
 
@@ -161,11 +188,68 @@ class Agilent34401ADriver(BaseInstrumentDriver):
 
     def measure_dc_voltage(self) -> MeasurementResult:
         """Measure DC voltage and return a normalized numeric result."""
+        return self._measure_function(
+            function="dc_voltage",
+            configure_command="CONF:VOLT:DC",
+            autorange_command="VOLT:DC:RANG:AUTO ON",
+            parameter="Voltage DC",
+            unit="V",
+        )
+
+    def measure_ac_voltage(self) -> MeasurementResult:
+        """Measure AC voltage using autorange."""
+        return self._measure_function(
+            function="ac_voltage",
+            configure_command="CONF:VOLT:AC",
+            autorange_command="VOLT:AC:RANG:AUTO ON",
+            parameter="Voltage AC",
+            unit="V",
+        )
+
+    def measure_resistance(self) -> MeasurementResult:
+        """Measure two-wire resistance using autorange."""
+        return self._measure_function(
+            function="resistance",
+            configure_command="CONF:RES",
+            autorange_command="RES:RANG:AUTO ON",
+            parameter="Resistance",
+            unit="Ω",
+        )
+
+    def _measure_function(
+        self,
+        *,
+        function: str,
+        configure_command: str,
+        autorange_command: str,
+        parameter: str,
+        unit: str,
+    ) -> MeasurementResult:
+        """Configure one function when needed and return its next reading."""
         try:
             if self.transport is None:
                 raise CommunicationError(
                     "The Agilent 34401A is not connected."
                 )
+            if self._prepared_function != function:
+                if self.serial_connection is None:
+                    raise CommunicationError(
+                        "The Agilent 34401A is not connected."
+                    )
+                self.serial_connection.reset_input_buffer()
+                self.serial_connection.write("*CLS\n".encode())
+                time.sleep(0.5)
+                self.serial_connection.write(
+                    f"{configure_command}\n".encode()
+                )
+                time.sleep(0.1)
+                self.serial_connection.write(
+                    f"{autorange_command}\n".encode()
+                )
+                time.sleep(0.1)
+                self._prepared_function = function
+                self._dc_voltage_prepared = function == "dc_voltage"
+
             response = self.transport.get_data()
             if response is None:
                 raise CommunicationError(
@@ -178,10 +262,10 @@ class Agilent34401ADriver(BaseInstrumentDriver):
             ) from exc
         except CommunicationError as exc:
             raise MeasurementError(
-                f"The Agilent 34401A measurement failed: {exc}"
+                f"The Agilent 34401A {parameter} measurement failed: {exc}"
             ) from exc
 
-        return MeasurementResult(parameter="Voltage DC", value=value, unit="V")
+        return MeasurementResult(parameter=parameter, value=value, unit=unit)
 
     def configure_dc_voltage_auto(self) -> FunctionConfiguration:
         """Enter remote mode before configuring and verifying DC voltage."""

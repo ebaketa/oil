@@ -58,6 +58,42 @@ Driver | {{ instrument.name }}
     </div>
 </div>
 
+<div class="card shadow-sm mb-4">
+    <div class="card-body">
+        <h3 class="h5">Supported measurement functions</h3>
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th scope="col">Function</th>
+                        <th scope="col">Unit</th>
+                        <th scope="col">Autorange</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for function_name, capability in capabilities.items %}
+                        <tr>
+                            <td data-function="{{ function_name }}">
+                                {{ capability.label }}
+                            </td>
+                            <td>{{ capability.unit }}</td>
+                            <td>
+                                {% if capability.autorange %}Yes{% else %}No{% endif %}
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr>
+                            <td class="text-muted text-center" colspan="3">
+                                No measurement functions are available.
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
 <div class="card shadow-sm">
     <div class="card-body">
         <h3 class="h5">Connection test</h3>

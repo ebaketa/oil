@@ -1,6 +1,7 @@
 """Database models for the OIL application."""
 
 from django.conf import settings
+from django.core.validators import MinValueValidator
 from django.db import models
 
 
@@ -42,6 +43,7 @@ class Instrument(models.Model):
 
         AGILENT_34401A = "agilent_34401a", "Agilent 34401A"
         KEYSIGHT_34461A = "keysight_34461a", "Keysight 34461A"
+        MOCK = "mock", "Mock instrument"
 
     class Status(models.TextChoices):
         """Connection states shown in the instrument inventory."""
@@ -57,7 +59,10 @@ class Instrument(models.Model):
     driver = models.CharField(max_length=32, choices=Driver.choices)
     address = models.CharField(
         max_length=255,
-        help_text="Device path such as /dev/ttyUSB0 or /dev/usbtmc0.",
+        help_text=(
+            "Device path such as /dev/ttyUSB0 or /dev/usbtmc0, "
+            "or mock://default."
+        ),
     )
     status = models.CharField(
         max_length=16,
@@ -81,6 +86,17 @@ class Instrument(models.Model):
         return f"{self.name} ({self.manufacturer} {self.model_name})"
 
     @property
+    def capabilities(self):
+        """Return capabilities published by the configured driver."""
+        from drivers.registry import DriverRegistry
+
+        return DriverRegistry.capabilities(self.driver)
+
+    def supports_function(self, function: str) -> bool:
+        """Return whether the configured driver supports a function."""
+        return function in self.capabilities
+
+    @property
     def status_badge(self):
         """Return the Bootstrap badge colour for the current status."""
         return {
@@ -90,9 +106,90 @@ class Instrument(models.Model):
         }.get(self.status, "secondary")
 
 
+class MeasurementRun(models.Model):
+    """Store the lifecycle and configuration of one measurement series."""
+
+    class Function(models.TextChoices):
+        """Measurement functions currently supported by OIL."""
+
+        DC_VOLTAGE = "dc_voltage", "DC voltage"
+        AC_VOLTAGE = "ac_voltage", "AC voltage"
+        RESISTANCE = "resistance", "Resistance"
+
+    class Mode(models.TextChoices):
+        """Supported measurement acquisition modes."""
+
+        SINGLE = "single", "Single"
+        CONTINUOUS = "continuous", "Continuous"
+        LOOP = "loop", "Loop"
+
+    class Status(models.TextChoices):
+        """Lifecycle states for a measurement run."""
+
+        PENDING = "pending", "Pending"
+        RUNNING = "running", "Running"
+        COMPLETED = "completed", "Completed"
+        STOPPED = "stopped", "Stopped"
+        FAILED = "failed", "Failed"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="measurement_runs",
+    )
+    instrument = models.ForeignKey(
+        Instrument,
+        on_delete=models.PROTECT,
+        related_name="measurement_runs",
+    )
+    function = models.CharField(max_length=50, choices=Function.choices)
+    mode = models.CharField(max_length=16, choices=Mode.choices)
+    interval = models.FloatField(
+        null=True,
+        blank=True,
+        validators=(MinValueValidator(0.1),),
+        help_text="Seconds between readings.",
+    )
+    requested_count = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        validators=(MinValueValidator(1),),
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    started_at = models.DateTimeField(null=True, blank=True)
+    stopped_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    error = models.TextField(blank=True)
+
+    class Meta:
+        """Show the most recently started runs first."""
+
+        ordering = ("-started_at", "-pk")
+
+    def __str__(self):
+        """Return a readable run summary."""
+        return (
+            f"{self.get_mode_display()} {self.get_function_display()} "
+            f"on {self.instrument.name}"
+        )
+
+
 class Measurement(models.Model):
     """Store one normalized reading returned by an instrument driver."""
 
+    run = models.ForeignKey(
+        MeasurementRun,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="measurements",
+    )
     instrument = models.ForeignKey(
         Instrument,
         on_delete=models.PROTECT,
