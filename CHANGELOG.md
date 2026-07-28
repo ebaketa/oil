@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.8] - 2026-07-29
+
+### Added
+
+- Extended the Mock instrument with deterministic DC current, AC current, and
+  temperature capabilities and realistic function-specific default readings.
+- Added a separate Mock DC Power Supply driver with a programmable 0 to 60 V
+  output, 1 mV resolution, output enable/disable control, setpoint readback,
+  simulated terminal-voltage measurement, and safe disconnect behavior.
+- Added a persistent Tasks workspace with Saved Tasks, internal New/Open tabs,
+  a flexible instrument builder with nested configuration tabs, fixed, sweep,
+  and cycle voltage programs, virtual or external DMM voltage sources, seeded
+  bounded temperature generation, background execution, generic per-instrument
+  readings, live stored results, explicit Stop, and guaranteed PSU cleanup.
+- Added per-user profile controls for independently showing or hiding the top
+  navigation bar and sidebar, choosing a left or right sidebar position, and
+  using full-width content when the sidebar is off.
+
 ## [0.0.7] - 2026-07-27
 
 ### Fixed
@@ -189,7 +207,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the public Python API.
 - GNU Affero General Public License, version 3 or later.
 
-[Unreleased]: https://github.com/ebaketa/oil/compare/v0.0.7...HEAD
+[Unreleased]: https://github.com/ebaketa/oil/compare/v0.0.8...HEAD
+[0.0.8]: https://github.com/ebaketa/oil/compare/v0.0.7...v0.0.8
 [0.0.7]: https://github.com/ebaketa/oil/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/ebaketa/oil/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/ebaketa/oil/compare/v0.0.4...v0.0.5

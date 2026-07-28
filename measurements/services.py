@@ -15,15 +15,24 @@ from .models import Measurement
 def _read_measurement(driver, measurement_type: str):
     """Execute one supported measurement against an active driver."""
     measurement_methods = {
-        "dc_voltage": driver.measure_dc_voltage,
-        "ac_voltage": driver.measure_ac_voltage,
-        "resistance": driver.measure_resistance,
+        "dc_voltage": "measure_dc_voltage",
+        "ac_voltage": "measure_ac_voltage",
+        "dc_current": "measure_dc_current",
+        "ac_current": "measure_ac_current",
+        "resistance": "measure_resistance",
+        "temperature": "measure_temperature",
     }
     try:
-        measurement_method = measurement_methods[measurement_type]
+        method_name = measurement_methods[measurement_type]
     except KeyError as exc:
         raise DriverError(
             f"Unsupported measurement type: {measurement_type}"
+        ) from exc
+    try:
+        measurement_method = getattr(driver, method_name)
+    except AttributeError as exc:
+        raise DriverError(
+            f"Driver does not support measurement type: {measurement_type}"
         ) from exc
     return measurement_method()
 

@@ -19,6 +19,12 @@ class UserPreference(models.Model):
         PURPLE = "purple", "Purple"
         TEAL = "teal", "Teal"
 
+    class SidebarPosition(models.TextChoices):
+        """Available horizontal sidebar positions."""
+
+        LEFT = "left", "Left"
+        RIGHT = "right", "Right"
+
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -28,6 +34,13 @@ class UserPreference(models.Model):
         max_length=16,
         choices=Theme.choices,
         default=Theme.BLUE,
+    )
+    show_top_navigation = models.BooleanField(default=True)
+    show_sidebar = models.BooleanField(default=True)
+    sidebar_position = models.CharField(
+        max_length=8,
+        choices=SidebarPosition.choices,
+        default=SidebarPosition.LEFT,
     )
 
     def __str__(self):
@@ -44,6 +57,10 @@ class Instrument(models.Model):
         AGILENT_34401A = "agilent_34401a", "Agilent 34401A"
         KEYSIGHT_34461A = "keysight_34461a", "Keysight 34461A"
         MOCK = "mock", "Mock instrument"
+        MOCK_DC_POWER_SUPPLY = (
+            "mock_dc_power_supply",
+            "Mock DC Power Supply",
+        )
 
     class Status(models.TextChoices):
         """Connection states shown in the instrument inventory."""
@@ -61,7 +78,7 @@ class Instrument(models.Model):
         max_length=255,
         help_text=(
             "Device path such as /dev/ttyUSB0 or /dev/usbtmc0, "
-            "or mock://default."
+            "mock://default, or mock-psu://default."
         ),
     )
     status = models.CharField(
@@ -114,7 +131,10 @@ class MeasurementRun(models.Model):
 
         DC_VOLTAGE = "dc_voltage", "DC voltage"
         AC_VOLTAGE = "ac_voltage", "AC voltage"
+        DC_CURRENT = "dc_current", "DC current"
+        AC_CURRENT = "ac_current", "AC current"
         RESISTANCE = "resistance", "Resistance"
+        TEMPERATURE = "temperature", "Temperature"
 
     class Mode(models.TextChoices):
         """Supported measurement acquisition modes."""

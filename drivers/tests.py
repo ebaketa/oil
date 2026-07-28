@@ -16,6 +16,7 @@ from .exceptions import (
 from .factory import create_driver
 from .keysight_34461a import Keysight34461ADriver
 from .mock import MockInstrumentDriver
+from .mock_dc_power_supply import MockDCPowerSupplyDriver
 from .registry import DriverRegistry
 from .transports import InstrumentTransport
 
@@ -537,6 +538,18 @@ class DriverFactoryTests(SimpleTestCase):
         self.assertIsInstance(driver, MockInstrumentDriver)
         self.assertEqual(driver.address, "mock://default")
 
+    def test_factory_creates_mock_dc_power_supply(self):
+        """Power-supply inventory maps to its dedicated mock driver."""
+        driver = create_driver(
+            SimpleNamespace(
+                driver="mock_dc_power_supply",
+                address="mock-psu://default",
+            ),
+        )
+
+        self.assertIsInstance(driver, MockDCPowerSupplyDriver)
+        self.assertEqual(driver.address, "mock-psu://default")
+
 
 class DriverRegistryTests(SimpleTestCase):
     """Verify driver discovery and extension through the central registry."""
@@ -549,7 +562,12 @@ class DriverRegistryTests(SimpleTestCase):
         """The registry exposes both persistent built-in driver names."""
         self.assertEqual(
             DriverRegistry.names(),
-            ("agilent_34401a", "keysight_34461a", "mock"),
+            (
+                "agilent_34401a",
+                "keysight_34461a",
+                "mock",
+                "mock_dc_power_supply",
+            ),
         )
 
     def test_registered_driver_can_be_created_without_factory_changes(self):
@@ -583,7 +601,14 @@ class DriverRegistryTests(SimpleTestCase):
 
         self.assertEqual(
             tuple(capabilities),
-            ("dc_voltage", "ac_voltage", "resistance"),
+            (
+                "dc_voltage",
+                "ac_voltage",
+                "dc_current",
+                "ac_current",
+                "resistance",
+                "temperature",
+            ),
         )
         capability = capabilities["dc_voltage"]
         self.assertEqual(capability.label, "DC voltage")
@@ -608,6 +633,91 @@ class MockInstrumentDriverTests(SimpleTestCase):
         self.assertEqual(identity, MockInstrumentDriver.IDENTITY)
         self.assertFalse(driver.connected)
         self.assertEqual(driver.command_history, ("*IDN?",))
+
+
+class MockDCPowerSupplyDriverTests(SimpleTestCase):
+    """Verify deterministic programmable power-supply behavior."""
+
+    def test_identifies_and_starts_with_disabled_zero_volt_output(self):
+        """A fresh mock supply is safe and reports its stable identity."""
+        driver = MockDCPowerSupplyDriver()
+
+        with driver:
+            identity = driver.identify()
+            measured_voltage = driver.measure_output_voltage()
+
+        self.assertEqual(identity, driver.IDENTITY)
+        self.assertEqual(driver.voltage_setpoint, 0.0)
+        self.assertEqual(measured_voltage, 0.0)
+        self.assertFalse(driver.output_enabled)
+
+    def test_sets_voltage_from_zero_to_sixty_in_millivolt_steps(self):
+        """Boundary and intermediate millivolt setpoints are accepted."""
+        driver = MockDCPowerSupplyDriver()
+
+        with driver:
+            self.assertEqual(driver.set_voltage(0), 0.0)
+            self.assertEqual(driver.set_voltage("12.345"), 12.345)
+            self.assertEqual(driver.set_voltage(60), 60.0)
+            self.assertEqual(driver.query("VOLT?"), "60.000")
+
+    def test_rejects_out_of_range_and_sub_millivolt_setpoints(self):
+        """Unsafe voltages and unsupported resolution are rejected."""
+        driver = MockDCPowerSupplyDriver()
+
+        with driver:
+            for voltage in (-0.001, 60.001):
+                with self.subTest(voltage=voltage):
+                    with self.assertRaisesMessage(
+                        ConfigurationError,
+                        "between 0.000 V and 60.000 V",
+                    ):
+                        driver.set_voltage(voltage)
+            with self.assertRaisesMessage(
+                ConfigurationError,
+                "0.001 V steps",
+            ):
+                driver.set_voltage("1.2345")
+
+    def test_output_returns_setpoint_only_while_enabled(self):
+        """Output state controls the simulated terminal voltage."""
+        driver = MockDCPowerSupplyDriver()
+
+        with driver:
+            driver.set_voltage("24.500")
+            self.assertEqual(driver.measure_output_voltage(), 0.0)
+            driver.enable_output()
+            self.assertEqual(driver.measure_output_voltage(), 24.5)
+            self.assertTrue(driver.output_enabled)
+            driver.disable_output()
+            self.assertEqual(driver.measure_output_voltage(), 0.0)
+
+    def test_disconnect_always_disables_output(self):
+        """Leaving a session places the simulated supply in a safe state."""
+        driver = MockDCPowerSupplyDriver()
+
+        with driver:
+            driver.set_voltage(5)
+            driver.enable_output()
+
+        self.assertFalse(driver.output_enabled)
+        self.assertEqual(driver.voltage_setpoint, 5.0)
+
+    def test_connection_error_profile_is_deterministic(self):
+        """The failure profile rejects connection attempts."""
+        driver = MockDCPowerSupplyDriver(
+            "mock-psu://connection-error",
+        )
+
+        with self.assertRaisesMessage(
+            ConnectionError,
+            "mock DC power supply could not connect",
+        ):
+            driver.connect()
+
+
+class MockInstrumentDriverAdditionalTests(SimpleTestCase):
+    """Verify deterministic readings and failure profiles."""
 
     def test_measurements_cycle_through_configured_values(self):
         """Repeated readings deterministically cycle through test values."""
@@ -637,6 +747,36 @@ class MockInstrumentDriverTests(SimpleTestCase):
         self.assertEqual(
             resistance_result,
             MeasurementResult(parameter="Resistance", value=1000.0, unit="Ω"),
+        )
+
+    def test_current_and_temperature_have_realistic_default_readings(self):
+        """The extended mock normalizes current and temperature readings."""
+        driver = MockInstrumentDriver()
+
+        with driver:
+            dc_current = driver.measure_dc_current()
+            ac_current = driver.measure_ac_current()
+            temperature = driver.measure_temperature()
+
+        self.assertEqual(
+            dc_current,
+            MeasurementResult(parameter="Current DC", value=0.01, unit="A"),
+        )
+        self.assertEqual(
+            ac_current,
+            MeasurementResult(
+                parameter="Current AC",
+                value=0.00707,
+                unit="A",
+            ),
+        )
+        self.assertEqual(
+            temperature,
+            MeasurementResult(
+                parameter="Temperature",
+                value=23.0,
+                unit="°C",
+            ),
         )
 
     def test_dcv_auto_configuration_uses_standard_scpi_contract(self):

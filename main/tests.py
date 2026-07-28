@@ -152,7 +152,82 @@ class ThemePreferenceTests(TestCase):
         response = self.client.get(reverse("dashboard"))
 
         self.assertContains(response, "oil-theme-blue")
+        self.assertContains(response, "oil-theme-nav")
+        self.assertContains(response, "<aside", html=False)
         self.assertFalse(UserPreference.objects.filter(user=self.user).exists())
+
+    def test_user_can_hide_top_navigation_and_sidebar(self):
+        """Profile visibility settings remove both optional navigation bars."""
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("profile"),
+            {
+                "username": "theme-user",
+                "first_name": "",
+                "last_name": "",
+                "email": "",
+                "theme": UserPreference.Theme.BLUE,
+            },
+        )
+
+        self.assertRedirects(response, reverse("dashboard"))
+        preference = UserPreference.objects.get(user=self.user)
+        self.assertFalse(preference.show_top_navigation)
+        self.assertFalse(preference.show_sidebar)
+        dashboard = self.client.get(reverse("dashboard"))
+        self.assertNotContains(dashboard, "oil-theme-nav")
+        self.assertNotContains(dashboard, "<aside", html=False)
+        self.assertContains(dashboard, '<main class="col-12">', html=False)
+
+    def test_profile_can_keep_each_navigation_bar_visible(self):
+        """Checked profile fields persist both navigation bars."""
+        self.client.force_login(self.user)
+
+        self.client.post(
+            reverse("profile"),
+            {
+                "username": "theme-user",
+                "first_name": "",
+                "last_name": "",
+                "email": "",
+                "theme": UserPreference.Theme.BLUE,
+                "show_top_navigation": "on",
+                "show_sidebar": "on",
+                "sidebar_position": UserPreference.SidebarPosition.LEFT,
+            },
+        )
+
+        preference = UserPreference.objects.get(user=self.user)
+        self.assertTrue(preference.show_top_navigation)
+        self.assertTrue(preference.show_sidebar)
+
+    def test_user_can_move_sidebar_to_the_right(self):
+        """The saved Right position reverses desktop content ordering."""
+        self.client.force_login(self.user)
+
+        self.client.post(
+            reverse("profile"),
+            {
+                "username": "theme-user",
+                "first_name": "",
+                "last_name": "",
+                "email": "",
+                "theme": UserPreference.Theme.BLUE,
+                "show_top_navigation": "on",
+                "show_sidebar": "on",
+                "sidebar_position": UserPreference.SidebarPosition.RIGHT,
+            },
+        )
+
+        preference = UserPreference.objects.get(user=self.user)
+        self.assertEqual(
+            preference.sidebar_position,
+            UserPreference.SidebarPosition.RIGHT,
+        )
+        dashboard = self.client.get(reverse("dashboard"))
+        self.assertContains(dashboard, "order-md-2")
+        self.assertContains(dashboard, "order-md-1")
 
     def test_user_can_save_theme(self):
         """A valid profile theme is saved and applied to subsequent pages."""
@@ -1469,6 +1544,24 @@ class MeasurementServiceTests(TestCase):
         self.assertEqual(measurement.unit, "V")
         self.assertEqual(measurement.notes, "Hardware-free test")
         self.assertEqual(mock_instrument.status, Instrument.Status.REACHABLE)
+
+    def test_extended_mock_functions_run_through_measurement_service(self):
+        """Mock current and temperature functions use the complete service."""
+        mock_instrument = Instrument.objects.create(
+            name="Extended simulated DMM",
+            manufacturer="OIL",
+            model_name="Mock DMM",
+            driver=Instrument.Driver.MOCK,
+            address="mock://default",
+        )
+
+        dc_current = perform_measurement(mock_instrument, "dc_current")
+        ac_current = perform_measurement(mock_instrument, "ac_current")
+        temperature = perform_measurement(mock_instrument, "temperature")
+
+        self.assertEqual((dc_current.value, dc_current.unit), (0.01, "A"))
+        self.assertEqual((ac_current.value, ac_current.unit), (0.00707, "A"))
+        self.assertEqual((temperature.value, temperature.unit), (23.0, "°C"))
 
     @patch("measurements.services.ConnectionManager.temporary_session")
     def test_measurement_failure_does_not_store_a_result(self, session):

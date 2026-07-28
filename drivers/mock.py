@@ -12,6 +12,14 @@ class MockInstrumentDriver(BaseInstrumentDriver):
     """Simulate a digital multimeter without opening physical hardware."""
 
     DEFAULT_READINGS = (1.0, 1.001, 0.999, 1.002)
+    FUNCTION_READINGS = {
+        "dc_voltage": (1.0, 1.001, 0.999, 1.002),
+        "ac_voltage": (0.707, 0.708, 0.706, 0.707),
+        "dc_current": (0.010, 0.0101, 0.0099, 0.0102),
+        "ac_current": (0.00707, 0.00708, 0.00706, 0.00707),
+        "resistance": (1000.0, 1000.5, 999.5, 1001.0),
+        "temperature": (23.0, 23.1, 23.0, 22.9),
+    }
     IDENTITY = "OIL,MOCK-DMM,0001,1.0"
     CAPABILITIES = {
         "dc_voltage": MeasurementCapability(
@@ -24,10 +32,24 @@ class MockInstrumentDriver(BaseInstrumentDriver):
             unit="V",
             autorange=True,
         ),
+        "dc_current": MeasurementCapability(
+            label="DC current",
+            unit="A",
+            autorange=True,
+        ),
+        "ac_current": MeasurementCapability(
+            label="AC current",
+            unit="A",
+            autorange=True,
+        ),
         "resistance": MeasurementCapability(
             label="Resistance",
             unit="Ω",
             autorange=True,
+        ),
+        "temperature": MeasurementCapability(
+            label="Temperature",
+            unit="°C",
         ),
     }
 
@@ -43,13 +65,21 @@ class MockInstrumentDriver(BaseInstrumentDriver):
         if not address.startswith("mock://"):
             raise ValueError("Mock driver addresses must start with mock://.")
 
-        values = tuple(self.DEFAULT_READINGS if readings is None else readings)
-        if not values:
+        custom_values = None if readings is None else tuple(readings)
+        if custom_values is not None and not custom_values:
             raise ValueError("Mock driver readings cannot be empty.")
 
         self.address = address
         self.profile = address.removeprefix("mock://") or "default"
-        self._readings = cycle(values)
+        self._readings = (
+            cycle(custom_values)
+            if custom_values is not None
+            else None
+        )
+        self._function_readings = {
+            function: cycle(values)
+            for function, values in self.FUNCTION_READINGS.items()
+        }
         self.transport = transport or MockTransport(
             {
                 "*IDN?": self.IDENTITY,
@@ -104,17 +134,34 @@ class MockInstrumentDriver(BaseInstrumentDriver):
 
     def measure_dc_voltage(self) -> MeasurementResult:
         """Return the next deterministic simulated DC voltage."""
-        return self._measure("Voltage DC", "V")
+        return self._measure("dc_voltage", "Voltage DC", "V")
 
     def measure_ac_voltage(self) -> MeasurementResult:
         """Return the next deterministic simulated AC voltage."""
-        return self._measure("Voltage AC", "V")
+        return self._measure("ac_voltage", "Voltage AC", "V")
+
+    def measure_dc_current(self) -> MeasurementResult:
+        """Return the next deterministic simulated DC current."""
+        return self._measure("dc_current", "Current DC", "A")
+
+    def measure_ac_current(self) -> MeasurementResult:
+        """Return the next deterministic simulated AC current."""
+        return self._measure("ac_current", "Current AC", "A")
 
     def measure_resistance(self) -> MeasurementResult:
         """Return the next deterministic simulated resistance."""
-        return self._measure("Resistance", "Ω")
+        return self._measure("resistance", "Resistance", "Ω")
 
-    def _measure(self, parameter: str, unit: str) -> MeasurementResult:
+    def measure_temperature(self) -> MeasurementResult:
+        """Return the next deterministic simulated temperature."""
+        return self._measure("temperature", "Temperature", "°C")
+
+    def _measure(
+        self,
+        function: str,
+        parameter: str,
+        unit: str,
+    ) -> MeasurementResult:
         """Return the next reading or the configured simulated failure."""
         self._require_connection()
         if self.profile == "timeout":
@@ -124,6 +171,10 @@ class MockInstrumentDriver(BaseInstrumentDriver):
 
         return MeasurementResult(
             parameter=parameter,
-            value=float(next(self._readings)),
+            value=float(
+                next(self._readings)
+                if self._readings is not None
+                else next(self._function_readings[function])
+            ),
             unit=unit,
         )

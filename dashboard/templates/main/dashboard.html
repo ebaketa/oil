@@ -13,6 +13,18 @@ Dashboard
 
 <div class="row g-3 mb-4">
     <div class="col-sm-6 col-xl-3">
+        <a class="text-decoration-none text-body" href="{% url 'task_list' %}">
+            <div class="card oil-dashboard-card">
+                <div class="card-body">
+                    <div class="oil-dashboard-card-title">Tasks</div>
+                    <div class="text-muted mt-2">
+                        Configure and monitor measurement tasks.
+                    </div>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-sm-6 col-xl-3">
         <a class="text-decoration-none text-body" href="{% url 'instrument_list' %}">
             <div class="card oil-dashboard-card">
                 <div class="card-body">

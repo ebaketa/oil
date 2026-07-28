@@ -171,7 +171,7 @@ class ApiTests(TestCase):
             data=json.dumps(
                 {
                     "instrument_id": self.instrument.pk,
-                    "function": "temperature",
+                    "function": "capacitance",
                 },
             ),
             content_type="application/json",

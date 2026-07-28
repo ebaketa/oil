@@ -83,12 +83,40 @@ functions on the server, and the driver details page lists them for users.
 Hardware-independent unit tests use simulated serial and USBTMC connections.
 Application views do not communicate with either instrument directly.
 
-The registered Mock driver uses `mock://default` and cycles through stable
-readings for DC voltage, AC voltage, and resistance while following the same
-connect, identify, configure, measure, and disconnect contract as physical
-hardware. The
+The registered Mock driver uses `mock://default` and cycles through stable,
+function-specific readings for DC voltage, AC voltage, DC current, AC current,
+resistance, and temperature while following the same connect, identify,
+measure, and disconnect lifecycle as physical hardware. The
 `mock://timeout` and `mock://connection-error` profiles support deterministic
 failure-path testing.
+
+The separate Mock DC Power Supply uses `mock-psu://default`. It provides a
+single programmable output from 0.000 V to 60.000 V in exact 0.001 V steps.
+Its output starts disabled, measures zero volts while disabled, follows the
+configured setpoint while enabled, and is disabled automatically whenever its
+connection closes. The `mock-psu://connection-error` profile provides a
+deterministic connection failure.
+
+## Automation tasks
+
+The `tasks` application stores shared `AutomationTask` settings, an ordered
+collection of `TaskInstrument` assignments with driver-specific JSON
+configuration, synchronized `TaskSample` steps, and generic `TaskReading`
+values. The New Task builder starts empty: users add inventory instruments
+from a combobox and configure each in its own nested tab. Mock supply settings
+support a fixed setpoint, inclusive one-way sweep, or repeated up/down cycle.
+DMM tabs expose only capabilities published by the selected driver. A Mock DMM
+can follow the enabled virtual supply output with deterministic
+millivolt-scale error or use its external independent sequence. Temperature
+values use a stored random seed, range, and resolution so a run is repeatable.
+
+The current runner uses a bounded thread pool inside the Django process. It is
+independent of the browser page, polls a database stop flag, stores each sample,
+and closes every managed instrument connection through guaranteed cleanup.
+The Mock supply also disables its output on disconnect. This first background
+implementation is intended for the single-process development deployment; an
+application restart interrupts active tasks, and a future dedicated worker
+should claim queued jobs and reconcile interrupted states.
 
 ## Connection Manager
 

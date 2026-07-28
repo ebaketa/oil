@@ -1,0 +1,254 @@
+{% extends "main/base.html" %}
+{% load static %}
+
+{% block title %}
+Tasks
+{% endblock %}
+
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div class="d-flex flex-wrap align-items-baseline gap-3">
+        <h2 class="mb-0">Tasks</h2>
+        <p class="text-muted mb-0">
+            Configure and monitor measurement tasks.
+        </p>
+    </div>
+    <div class="d-flex gap-2">
+        <a class="btn btn-outline-secondary" href="{% url 'dashboard' %}">
+            Back
+        </a>
+        <button class="btn btn-primary" id="task-new-button" type="button">
+            New
+        </button>
+        <button class="btn btn-outline-primary"
+                id="task-open-button"
+                type="button"
+                disabled>
+            Open
+        </button>
+    </div>
+</div>
+
+<div class="d-none" id="task-csrf-token">{% csrf_token %}</div>
+{{ available_instruments|json_script:"task-available-instruments" }}
+
+<ul class="nav nav-tabs" id="task-tabs" role="tablist" aria-label="Tasks">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active"
+                id="saved-tasks-tab"
+                data-bs-toggle="tab"
+                data-bs-target="#saved-tasks-pane"
+                type="button"
+                role="tab"
+                aria-controls="saved-tasks-pane"
+                aria-selected="true">
+            Task list
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content border border-top-0 rounded-bottom p-3"
+     id="task-tab-content">
+    <section class="tab-pane fade show active"
+             id="saved-tasks-pane"
+             role="tabpanel"
+             aria-labelledby="saved-tasks-tab"
+             tabindex="0">
+        <div class="task-detail-header d-flex justify-content-between
+                    align-items-center">
+            <h3 class="h5 mb-0">Saved Tasks</h3>
+            <div>
+                <label class="visually-hidden" for="task-status-filter">
+                    Filter by status
+                </label>
+                <select class="form-select form-select-sm"
+                        id="task-status-filter">
+                    <option value="">All statuses</option>
+                    {% for value, label in task_status_choices %}
+                        <option value="{{ value }}">{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0"
+                   id="saved-task-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Task name</th>
+                        <th scope="col">Start date and time</th>
+                        <th scope="col">State</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for task in saved_tasks %}
+                        <tr class="task-row"
+                            tabindex="0"
+                            data-task-id="{{ task.pk }}"
+                            data-task-title="{{ task.name }}"
+                            data-instrument="{{ task.power_supply.name }}"
+                            data-function="{{ task.voltage_meter.name|default:'No voltage meter' }}"
+                            data-mode="{{ task.get_voltage_mode_display }}"
+                            data-status="{{ task.status }}"
+                            data-status-label="{{ task.get_status_display }}"
+                            data-started="{{ task.started_at|date:'d.m.Y H:i:s' }}"
+                            data-measurement-count="{{ task.sample_count }}"
+                            aria-selected="false">
+                            <th scope="row">{{ task.name }}</th>
+                            <td>
+                                {{ task.started_at|date:"d.m.Y H:i:s"|default:"—" }}
+                            </td>
+                            <td>
+                                {% if task.status == "pending" or task.status == "running" %}
+                                    <span class="badge text-bg-primary">Active</span>
+                                {% elif task.status == "completed" %}
+                                    <span class="badge text-bg-success">Executed</span>
+                                {% elif task.status == "stopped" %}
+                                    <span class="badge text-bg-secondary">Stopped</span>
+                                {% else %}
+                                    <span class="badge text-bg-danger">Failed</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr id="saved-task-empty-row">
+                            <td class="text-center text-muted py-4" colspan="3">
+                                No saved tasks are available.
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p class="small text-muted mt-2 mb-0">
+            Select a task and choose Open, or double-click a row.
+        </p>
+    </section>
+</div>
+
+<template id="task-tab-template">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link d-flex align-items-center gap-2"
+                type="button"
+                role="tab">
+            <span class="task-tab-label"></span>
+            <span class="task-tab-close"
+                  role="button"
+                  tabindex="0"
+                  aria-label="Close task tab">&times;</span>
+        </button>
+    </li>
+</template>
+
+<template id="task-pane-template">
+    <section class="tab-pane fade" role="tabpanel" tabindex="0">
+        <h3 class="h5 mb-3">Task settings</h3>
+        <form class="task-create-form" action="{% url 'task_create' %}">
+            {% csrf_token %}
+            <div class="row g-3 mb-4">
+                {% for field in task_form %}
+                    <div class="col-md-4">
+                        <label class="form-label">{{ field.label }}</label>
+                        {{ field }}
+                        <div class="invalid-feedback"></div>
+                    </div>
+                {% endfor %}
+            </div>
+
+            <div class="row g-2 align-items-end mb-3">
+                <div class="col">
+                    <label class="form-label">Instrument</label>
+                    <select class="form-select task-instrument-select">
+                        <option value="">Select instrument</option>
+                        {% for instrument in available_instruments %}
+                            <option value="{{ instrument.id }}">
+                                {{ instrument.name }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-auto">
+                    <button class="btn btn-outline-primary task-add-instrument"
+                            type="button">
+                        Add instrument
+                    </button>
+                </div>
+            </div>
+
+            <ul class="nav nav-tabs task-instrument-tabs"
+                role="tablist"></ul>
+            <div class="tab-content border border-top-0 rounded-bottom p-3
+                        task-instrument-content">
+                <p class="text-muted mb-0 task-no-instruments">
+                    No instruments have been added.
+                </p>
+            </div>
+            <input class="task-instruments-payload"
+                   name="instruments"
+                   type="hidden">
+
+            <div class="mt-3">
+                <button class="btn btn-primary" type="submit">Start Task</button>
+            </div>
+            <div class="alert alert-danger mt-3 d-none task-form-error"
+                 role="alert"></div>
+        </form>
+    </section>
+</template>
+
+<template id="saved-task-pane-template">
+    <section class="tab-pane fade" role="tabpanel" tabindex="0">
+        <div class="task-detail-header">
+            <div class="d-flex flex-wrap justify-content-between
+                        align-items-baseline gap-2 mb-3">
+                <div class="d-flex flex-wrap align-items-baseline gap-2">
+                    <h3 class="h5 mb-0 saved-task-heading"></h3>
+                    <span class="text-muted saved-task-summary"></span>
+                </div>
+                <span class="btn btn-sm disabled saved-task-status"
+                      aria-disabled="true"></span>
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-4 mb-3">
+                <div>
+                    <strong>Started:</strong>
+                    <span class="saved-task-started"></span>
+                </div>
+                <div>
+                    <strong>Measurements:</strong>
+                    <span class="saved-task-count"></span>
+                </div>
+                <a class="btn btn-sm btn-outline-secondary ms-auto d-none
+                          task-export-button"
+                   href="#">
+                    Export to CSV
+                </a>
+            </div>
+            <div class="d-flex gap-2">
+                <button class="btn btn-danger task-stop-button"
+                        type="button">
+                    Stop
+                </button>
+                <span class="text-danger align-self-center
+                             task-detail-error"></span>
+            </div>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm">
+                <thead>
+                    <tr class="task-results-header">
+                        <th>Time</th>
+                    </tr>
+                </thead>
+                <tbody class="task-sample-rows"></tbody>
+            </table>
+        </div>
+    </section>
+</template>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{% static 'tasks/js/task_tabs.js' %}"></script>
+{% endblock %}

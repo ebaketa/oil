@@ -9,6 +9,17 @@ from .models import UserPreference
 class UserPreferenceAdmin(admin.ModelAdmin):
     """Display user interface preferences in Django admin."""
 
-    list_display = ("user", "theme")
-    list_filter = ("theme",)
+    list_display = (
+        "user",
+        "theme",
+        "show_top_navigation",
+        "show_sidebar",
+        "sidebar_position",
+    )
+    list_filter = (
+        "theme",
+        "show_top_navigation",
+        "show_sidebar",
+        "sidebar_position",
+    )
     search_fields = ("user__username",)

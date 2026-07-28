@@ -6,9 +6,24 @@ Open Instrument Lab (OIL) is a Django application for laboratory instrument
 workflows.
 
 The current application provides authenticated Dashboard, instrument inventory,
-user profile, About, and Contact pages. Drivers support DC voltage, AC voltage,
-and two-wire resistance on the Agilent 34401A over serial/FTDI, the Keysight
-34461A over Linux USBTMC, and a deterministic Mock instrument.
+user profile, About, and Contact pages. Physical drivers support DC voltage,
+AC voltage, and two-wire resistance on the Agilent 34401A over serial/FTDI and
+the Keysight 34461A over Linux USBTMC. The deterministic Mock instrument also
+supports DC current, AC current, and temperature for hardware-free development.
+A separate Mock DC Power Supply provides a programmable 0 to 60 V output with
+1 mV resolution and a safe disabled-by-default output state.
+
+The Tasks workspace provides an instrument builder: users select inventory
+instruments one at a time, add each to the task, and configure it in a nested
+instrument tab. Tasks run in the background of the Django process. Mock supply
+settings support fixed voltage, one-way sweeps, and repeated cycles; DMM tabs
+offer driver capabilities and external or compatible virtual sources, while
+seeded temperature samples use user-defined bounds. Task tabs poll generic
+per-instrument readings, and leaving the page does not stop acquisition.
+
+Each user can independently choose a colour theme and show or hide the top
+navigation bar and sidebar from their Profile page. A visible sidebar can be
+positioned on either the left or right.
 
 Notable project changes are recorded in the [`CHANGELOG.md`](CHANGELOG.md)
 file.

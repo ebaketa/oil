@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, ClassVar, Mapping, Self
 
-from .exceptions import CommunicationError, ConfigurationError
+from .exceptions import CommunicationError, ConfigurationError, MeasurementError
 
 if TYPE_CHECKING:
     from main.models import Instrument
@@ -163,14 +163,14 @@ class BaseInstrumentDriver(ABC):
             autorange=True,
         )
 
-    @abstractmethod
     def measure_dc_voltage(self) -> MeasurementResult:
         """Measure DC voltage and return a normalized result."""
+        raise MeasurementError("This driver does not support DC voltage.")
 
-    @abstractmethod
     def measure_ac_voltage(self) -> MeasurementResult:
         """Measure AC voltage and return a normalized result."""
+        raise MeasurementError("This driver does not support AC voltage.")
 
-    @abstractmethod
     def measure_resistance(self) -> MeasurementResult:
         """Measure two-wire resistance and return a normalized result."""
+        raise MeasurementError("This driver does not support resistance.")
