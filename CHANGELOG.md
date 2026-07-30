@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added optional short task descriptions and selectable Single, Continuous,
+  and Loop execution modes with mode-specific interval and measurement-count
+  settings.
+- Added owner-only task deletion with confirmation, active-task protection,
+  cascading cleanup of stored readings, and immediate Task list updates.
+- Added confirmation before stopping an active task and an owner-only action
+  for marking a stopped task as completed.
+
+### Changed
+
+- Simplified the new-task header by removing the generic Task settings heading
+  and moving Stop beside the live task status.
+- Completed tasks are now labelled consistently as Completed in the Task list.
+
+### Fixed
+
+- Newly created tasks now appear in the Task list immediately without a page
+  reload.
+- Task JavaScript assets now use cache-busting versions so interface changes
+  are not hidden by stale browser caches.
+
 ## [0.0.8] - 2026-07-29
 
 ### Added

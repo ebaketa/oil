@@ -3,6 +3,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from decimal import Decimal
+from itertools import cycle, islice
 from threading import Event, Lock
 
 from django.db import close_old_connections
@@ -41,6 +42,17 @@ def voltage_sequence(task: AutomationTask) -> tuple[Decimal, ...]:
     reverse_values = values[-2:0:-1]
     cycle = values + reverse_values
     return tuple(cycle * task.cycle_count)
+
+
+def measurement_sequence(task, base_sequence):
+    """Apply the selected measurement mode to an instrument sequence."""
+    if task.measurement_mode == AutomationTask.MeasurementMode.SINGLE:
+        return base_sequence[:1]
+    if task.measurement_mode == AutomationTask.MeasurementMode.LOOP:
+        return tuple(
+            islice(cycle(base_sequence), task.requested_samples),
+        )
+    return cycle(base_sequence)
 
 
 def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
@@ -88,11 +100,7 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
         task.start_voltage = Decimal(supply_config["start_voltage"])
         task.stop_voltage = Decimal(supply_config["stop_voltage"])
         task.voltage_step = Decimal(supply_config["voltage_step"])
-        task.cycle_count = (
-            task.requested_samples
-            if task.voltage_mode == AutomationTask.VoltageMode.FIXED
-            else int(supply_config.get("cycle_count", 1))
-        )
+        task.cycle_count = int(supply_config.get("cycle_count", 1))
 
     benches = {}
     for assignment in assignments:
@@ -143,14 +151,12 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
             if supply:
                 supply.enable_output()
 
-            sequence = (
+            base_sequence = (
                 voltage_sequence(task)
                 if supply
-                else tuple(
-                    Decimal("0")
-                    for _index in range(task.requested_samples)
-                )
+                else (Decimal("0"),)
             )
+            sequence = measurement_sequence(task, base_sequence)
             for index, voltage in enumerate(sequence, start=1):
                 task.refresh_from_db(fields=("stop_requested",))
                 if event.is_set() or task.stop_requested:
@@ -238,7 +244,12 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
                     update_fields=("measured_voltage", "temperature"),
                 )
 
-                if index < len(sequence) and event.wait(task.interval_seconds):
+                should_wait = (
+                    task.measurement_mode
+                    == AutomationTask.MeasurementMode.CONTINUOUS
+                    or index < len(sequence)
+                )
+                if should_wait and event.wait(task.interval_seconds):
                     task.status = AutomationTask.Status.STOPPED
                     break
             else:

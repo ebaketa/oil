@@ -27,6 +27,12 @@ Tasks
                 disabled>
             Open
         </button>
+        <button class="btn btn-outline-danger"
+                id="task-delete-button"
+                type="button"
+                disabled>
+            Delete
+        </button>
     </div>
 </div>
 
@@ -97,18 +103,18 @@ Tasks
                             data-measurement-count="{{ task.sample_count }}"
                             aria-selected="false">
                             <th scope="row">{{ task.name }}</th>
-                            <td>
+                            <td class="task-row-started">
                                 {{ task.started_at|date:"d.m.Y H:i:s"|default:"—" }}
                             </td>
                             <td>
                                 {% if task.status == "pending" or task.status == "running" %}
-                                    <span class="badge text-bg-primary">Active</span>
+                                    <span class="task-row-state badge text-bg-primary">Active</span>
                                 {% elif task.status == "completed" %}
-                                    <span class="badge text-bg-success">Executed</span>
+                                    <span class="task-row-state badge text-bg-success">Completed</span>
                                 {% elif task.status == "stopped" %}
-                                    <span class="badge text-bg-secondary">Stopped</span>
+                                    <span class="task-row-state badge text-bg-secondary">Stopped</span>
                                 {% else %}
-                                    <span class="badge text-bg-danger">Failed</span>
+                                    <span class="task-row-state badge text-bg-danger">Failed</span>
                                 {% endif %}
                             </td>
                         </tr>
@@ -144,17 +150,45 @@ Tasks
 
 <template id="task-pane-template">
     <section class="tab-pane fade" role="tabpanel" tabindex="0">
-        <h3 class="h5 mb-3">Task settings</h3>
         <form class="task-create-form" action="{% url 'task_create' %}">
             {% csrf_token %}
             <div class="row g-3 mb-4">
-                {% for field in task_form %}
-                    <div class="col-md-4">
-                        <label class="form-label">{{ field.label }}</label>
-                        {{ field }}
-                        <div class="invalid-feedback"></div>
-                    </div>
-                {% endfor %}
+                <div class="col-md-4">
+                    <label class="form-label">{{ task_form.name.label }}</label>
+                    {{ task_form.name }}
+                    <div class="invalid-feedback"></div>
+                </div>
+                <div class="col-md-8">
+                    <label class="form-label">
+                        {{ task_form.description.label }}
+                    </label>
+                    {{ task_form.description }}
+                    <div class="invalid-feedback"></div>
+                </div>
+            </div>
+
+            <div class="row g-3 align-items-end mb-4">
+                <div class="col-md-4">
+                    <label class="form-label">
+                        {{ task_form.measurement_mode.label }}
+                    </label>
+                    {{ task_form.measurement_mode }}
+                    <div class="invalid-feedback"></div>
+                </div>
+                <div class="col-md-4 task-interval-field d-none">
+                    <label class="form-label">
+                        {{ task_form.interval_seconds.label }}
+                    </label>
+                    {{ task_form.interval_seconds }}
+                    <div class="invalid-feedback"></div>
+                </div>
+                <div class="col-md-4 task-count-field d-none">
+                    <label class="form-label">
+                        {{ task_form.requested_samples.label }}
+                    </label>
+                    {{ task_form.requested_samples }}
+                    <div class="invalid-feedback"></div>
+                </div>
             </div>
 
             <div class="row g-2 align-items-end mb-3">
@@ -207,8 +241,19 @@ Tasks
                     <h3 class="h5 mb-0 saved-task-heading"></h3>
                     <span class="text-muted saved-task-summary"></span>
                 </div>
-                <span class="btn btn-sm disabled saved-task-status"
-                      aria-disabled="true"></span>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="btn btn-sm disabled saved-task-status"
+                          aria-disabled="true"></span>
+                    <button class="btn btn-sm btn-danger task-stop-button"
+                            type="button">
+                        Stop
+                    </button>
+                    <button class="btn btn-sm btn-success
+                                   task-complete-button"
+                            type="button">
+                        Mark as completed
+                    </button>
+                </div>
             </div>
             <div class="d-flex flex-wrap align-items-center gap-4 mb-3">
                 <div>
@@ -225,14 +270,7 @@ Tasks
                     Export to CSV
                 </a>
             </div>
-            <div class="d-flex gap-2">
-                <button class="btn btn-danger task-stop-button"
-                        type="button">
-                    Stop
-                </button>
-                <span class="text-danger align-self-center
-                             task-detail-error"></span>
-            </div>
+            <div class="text-danger task-detail-error"></div>
         </div>
         <div class="table-responsive">
             <table class="table table-sm">
@@ -250,5 +288,5 @@ Tasks
 {% endblock %}
 
 {% block scripts %}
-<script src="{% static 'tasks/js/task_tabs.js' %}"></script>
+<script src="{% static 'tasks/js/task_tabs.js' %}?v=6"></script>
 {% endblock %}

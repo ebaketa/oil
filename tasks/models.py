@@ -17,6 +17,11 @@ class AutomationTask(models.Model):
         STOPPED = "stopped", "Stopped"
         FAILED = "failed", "Failed"
 
+    class MeasurementMode(models.TextChoices):
+        SINGLE = "single", "Single"
+        CONTINUOUS = "continuous", "Continuous"
+        LOOP = "loop", "Loop"
+
     class VoltageMode(models.TextChoices):
         FIXED = "fixed", "Fixed"
         SWEEP = "sweep", "Sweep"
@@ -32,6 +37,12 @@ class AutomationTask(models.Model):
         related_name="automation_tasks",
     )
     name = models.CharField(max_length=120)
+    description = models.CharField(max_length=500, blank=True)
+    measurement_mode = models.CharField(
+        max_length=16,
+        choices=MeasurementMode.choices,
+        default=MeasurementMode.SINGLE,
+    )
     power_supply = models.ForeignKey(
         Instrument,
         null=True,
@@ -190,7 +201,7 @@ class TaskReading(models.Model):
     )
     task_instrument = models.ForeignKey(
         TaskInstrument,
-        on_delete=models.PROTECT,
+        on_delete=models.CASCADE,
         related_name="readings",
     )
     parameter = models.CharField(max_length=50)

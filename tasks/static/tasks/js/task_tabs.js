@@ -3,6 +3,7 @@
 
     const newButton = document.querySelector("#task-new-button");
     const openButton = document.querySelector("#task-open-button");
+    const deleteButton = document.querySelector("#task-delete-button");
     const tabList = document.querySelector("#task-tabs");
     const tabContent = document.querySelector("#task-tab-content");
     const tabTemplate = document.querySelector("#task-tab-template");
@@ -28,6 +29,7 @@
     if (
         !newButton
         || !openButton
+        || !deleteButton
         || !tabList
         || !tabContent
         || !tabTemplate
@@ -352,6 +354,16 @@
             pane,
         });
         const form = pane.querySelector(".task-create-form");
+        const measurementMode = form.elements.measurement_mode;
+        const intervalField = pane.querySelector(".task-interval-field");
+        const countField = pane.querySelector(".task-count-field");
+        const updateMeasurementFields = () => {
+            const mode = measurementMode.value;
+            intervalField.classList.toggle("d-none", mode === "single");
+            countField.classList.toggle("d-none", mode !== "loop");
+        };
+        measurementMode.addEventListener("change", updateMeasurementFields);
+        updateMeasurementFields();
         const collectInstruments = initializeInstrumentBuilder(pane);
         form.addEventListener("submit", async (event) => {
             event.preventDefault();
@@ -394,6 +406,7 @@
                 trigger.closest("li").querySelector(
                     ".task-tab-close",
                 ).click();
+                upsertTaskRow(payload);
                 openTaskData(payload);
             } catch (error) {
                 errorBox.textContent = error.message;
@@ -413,12 +426,94 @@
         selectedRow.classList.add("table-active");
         selectedRow.setAttribute("aria-selected", "true");
         openButton.disabled = false;
+        const active = ["pending", "running"].includes(row.dataset.status);
+        deleteButton.disabled = active;
+        deleteButton.title = active
+            ? "Stop the active task before deleting it."
+            : "";
+    };
+
+    const setTaskRowData = (row, task) => {
+        row.dataset.taskId = task.id;
+        row.dataset.taskTitle = task.name;
+        row.dataset.status = task.status;
+        row.dataset.statusLabel = task.status_label;
+        row.dataset.started = formatDateTime(task.started_at);
+        row.dataset.measurementCount = task.sample_count;
+        row.querySelector("th").textContent = task.name;
+        row.querySelector(".task-row-started").textContent = (
+            formatDateTime(task.started_at)
+        );
+        const state = row.querySelector(".task-row-state");
+        const active = ["pending", "running"].includes(task.status);
+        const stateLabels = {
+            completed: "Completed",
+            stopped: "Stopped",
+            failed: "Failed",
+        };
+        state.textContent = active
+            ? "Active"
+            : stateLabels[task.status] || task.status_label;
+        state.className = "task-row-state badge";
+        state.classList.add({
+            pending: "text-bg-primary",
+            running: "text-bg-primary",
+            completed: "text-bg-success",
+            stopped: "text-bg-secondary",
+            failed: "text-bg-danger",
+        }[task.status] || "text-bg-secondary");
+        if (selectedRow === row) {
+            selectRow(row);
+        }
+    };
+
+    const bindTaskRow = (row) => {
+        row.addEventListener("click", () => selectRow(row));
+        row.addEventListener("dblclick", () => openSavedTask(row));
+        row.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                selectRow(row);
+                if (event.key === "Enter") {
+                    openSavedTask(row);
+                }
+            }
+        });
+    };
+
+    const upsertTaskRow = (task) => {
+        let row = taskRows.find(
+            (candidate) => candidate.dataset.taskId === String(task.id),
+        );
+        if (!row) {
+            row = document.createElement("tr");
+            row.className = "task-row";
+            row.tabIndex = 0;
+            row.setAttribute("aria-selected", "false");
+            const name = document.createElement("th");
+            name.scope = "row";
+            const started = document.createElement("td");
+            started.className = "task-row-started";
+            const stateCell = document.createElement("td");
+            const state = document.createElement("span");
+            state.className = "task-row-state badge";
+            stateCell.append(state);
+            row.append(name, started, stateCell);
+            document.querySelector("#saved-task-empty-row")?.remove();
+            document.querySelector("#saved-task-table tbody").prepend(row);
+            taskRows.unshift(row);
+            bindTaskRow(row);
+        }
+        setTaskRowData(row, task);
+        filterRows();
+        return row;
     };
 
     const renderTaskData = (pane, task) => {
+        upsertTaskRow(task);
         pane.querySelector(".saved-task-heading").textContent = task.name;
         pane.querySelector(".saved-task-summary").textContent = (
-            `${task.voltage_mode} · ${task.voltage_source}`
+            task.measurement_mode_label
         );
         const status = pane.querySelector(".saved-task-status");
         status.textContent = task.status_label;
@@ -452,6 +547,10 @@
         stopButton.classList.toggle(
             "d-none",
             !["pending", "running"].includes(task.status),
+        );
+        pane.querySelector(".task-complete-button").classList.toggle(
+            "d-none",
+            task.status !== "stopped",
         );
 
         const rows = pane.querySelector(".task-sample-rows");
@@ -546,18 +645,86 @@
         pane.querySelector(".task-stop-button").addEventListener(
             "click",
             async () => {
+                const confirmed = window.confirm(
+                    `Stop task "${task.name}"?\n\n`
+                    + "The current measurement sequence will be stopped.",
+                );
+                if (!confirmed) {
+                    return;
+                }
+                const stopButton = pane.querySelector(".task-stop-button");
+                stopButton.disabled = true;
+                stopButton.textContent = "Stopping…";
                 const csrfToken = document.querySelector(
                     '[name="csrfmiddlewaretoken"]',
                 ).value;
-                const response = await fetch(`/tasks/${taskId}/stop/`, {
-                    method: "POST",
-                    headers: {"X-CSRFToken": csrfToken},
-                });
-                if (!response.ok) {
-                    const payload = await response.json();
-                    pane.querySelector(".task-detail-error").textContent = (
-                        payload.error || "Task could not be stopped."
+                try {
+                    const response = await fetch(`/tasks/${taskId}/stop/`, {
+                        method: "POST",
+                        headers: {"X-CSRFToken": csrfToken},
+                    });
+                    const contentType = (
+                        response.headers.get("content-type") || ""
                     );
+                    const payload = contentType.includes("application/json")
+                        ? await response.json()
+                        : {};
+                    if (!response.ok) {
+                        throw new Error(
+                            payload.error || "Task could not be stopped.",
+                        );
+                    }
+                } catch (error) {
+                    pane.querySelector(".task-detail-error").textContent = (
+                        error.message
+                    );
+                    stopButton.disabled = false;
+                    stopButton.textContent = "Stop";
+                }
+            },
+        );
+        pane.querySelector(".task-complete-button").addEventListener(
+            "click",
+            async () => {
+                const confirmed = window.confirm(
+                    `Mark task "${task.name}" as completed?`,
+                );
+                if (!confirmed) {
+                    return;
+                }
+                const completeButton = pane.querySelector(
+                    ".task-complete-button",
+                );
+                completeButton.disabled = true;
+                try {
+                    const csrfToken = document.querySelector(
+                        '[name="csrfmiddlewaretoken"]',
+                    ).value;
+                    const response = await fetch(
+                        `/tasks/${taskId}/complete/`,
+                        {
+                            method: "POST",
+                            headers: {"X-CSRFToken": csrfToken},
+                        },
+                    );
+                    const contentType = (
+                        response.headers.get("content-type") || ""
+                    );
+                    const payload = contentType.includes("application/json")
+                        ? await response.json()
+                        : {};
+                    if (!response.ok) {
+                        throw new Error(
+                            payload.error
+                            || "Task could not be marked as completed.",
+                        );
+                    }
+                    renderTaskData(pane, payload);
+                } catch (error) {
+                    pane.querySelector(".task-detail-error").textContent = (
+                        error.message
+                    );
+                    completeButton.disabled = false;
                 }
             },
         );
@@ -606,25 +773,87 @@
             selectedRow.setAttribute("aria-selected", "false");
             selectedRow = null;
             openButton.disabled = true;
+            deleteButton.disabled = true;
         }
     };
 
-    taskRows.forEach((row) => {
-        row.addEventListener("click", () => selectRow(row));
-        row.addEventListener("dblclick", () => openSavedTask(row));
-        row.addEventListener("keydown", (event) => {
-            if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                selectRow(row);
-                if (event.key === "Enter") {
-                    openSavedTask(row);
-                }
+    const deleteSelectedTask = async () => {
+        if (!selectedRow || deleteButton.disabled) {
+            return;
+        }
+        const taskId = selectedRow.dataset.taskId;
+        const taskName = selectedRow.dataset.taskTitle;
+        const confirmed = window.confirm(
+            `Delete task "${taskName}"?\n\n`
+            + "This permanently deletes the task and all its measurements.",
+        );
+        if (!confirmed) {
+            return;
+        }
+        deleteButton.disabled = true;
+        try {
+            const csrfToken = document.querySelector(
+                '[name="csrfmiddlewaretoken"]',
+            ).value;
+            const response = await fetch(`/tasks/${taskId}/delete/`, {
+                method: "POST",
+                headers: {"X-CSRFToken": csrfToken},
+            });
+            const contentType = response.headers.get("content-type") || "";
+            const payload = contentType.includes("application/json")
+                ? await response.json()
+                : {};
+            if (!response.ok) {
+                throw new Error(
+                    payload.error
+                    || `Task could not be deleted (server returned `
+                    + `${response.status}). Restart the OIL service and retry.`,
+                );
             }
-        });
-    });
+
+            const openTrigger = document.querySelector(
+                `[data-open-task-id="${taskId}"]`,
+            );
+            if (openTrigger) {
+                const pane = document.querySelector(
+                    openTrigger.dataset.bsTarget,
+                );
+                closeTab(openTrigger.closest("li"), pane, openTrigger);
+            }
+            const deletedRow = selectedRow;
+            selectedRow = null;
+            deletedRow.remove();
+            const rowIndex = taskRows.indexOf(deletedRow);
+            if (rowIndex !== -1) {
+                taskRows.splice(rowIndex, 1);
+            }
+            openButton.disabled = true;
+            deleteButton.disabled = true;
+            if (!taskRows.length) {
+                const emptyRow = document.createElement("tr");
+                emptyRow.id = "saved-task-empty-row";
+                const cell = document.createElement("td");
+                cell.className = "text-center text-muted py-4";
+                cell.colSpan = 3;
+                cell.textContent = "No saved tasks are available.";
+                emptyRow.append(cell);
+                document.querySelector("#saved-task-table tbody").append(
+                    emptyRow,
+                );
+            }
+        } catch (error) {
+            window.alert(error.message);
+            if (selectedRow) {
+                selectRow(selectedRow);
+            }
+        }
+    };
+
+    taskRows.forEach(bindTaskRow);
 
     newButton.addEventListener("click", openNewTask);
     openButton.addEventListener("click", () => openSavedTask(selectedRow));
+    deleteButton.addEventListener("click", deleteSelectedTask);
     statusFilter?.addEventListener("change", filterRows);
 
     taskRows

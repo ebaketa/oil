@@ -62,6 +62,9 @@ def _serialize_task(task, *, include_samples=False):
     payload = {
         "id": task.pk,
         "name": task.name,
+        "description": task.description,
+        "measurement_mode": task.measurement_mode,
+        "measurement_mode_label": task.get_measurement_mode_display(),
         "status": task.status,
         "status_label": task.get_status_display(),
         "power_supply": (
@@ -348,6 +351,8 @@ def task_create(request):
         task = AutomationTask.objects.create(
             user=request.user,
             name=form.cleaned_data["name"],
+            description=form.cleaned_data["description"],
+            measurement_mode=form.cleaned_data["measurement_mode"],
             interval_seconds=form.cleaned_data["interval_seconds"],
             requested_samples=form.cleaned_data["requested_samples"],
             power_supply=power_supply,
@@ -407,6 +412,44 @@ def task_stop(request, pk):
         )
     TaskRunner.stop(task.pk)
     return JsonResponse({"stopping": True})
+
+
+@login_required
+@require_POST
+def task_complete(request, pk):
+    """Mark one owned stopped task as completed."""
+    try:
+        task = AutomationTask.objects.get(pk=pk, user=request.user)
+    except AutomationTask.DoesNotExist:
+        return JsonResponse({"error": "Task was not found."}, status=404)
+    if task.status != AutomationTask.Status.STOPPED:
+        return JsonResponse(
+            {"error": "Only a stopped task can be marked as completed."},
+            status=409,
+        )
+    task.status = AutomationTask.Status.COMPLETED
+    task.save(update_fields=("status",))
+    return JsonResponse(_serialize_task(task))
+
+
+@login_required
+@require_POST
+def task_delete(request, pk):
+    """Permanently delete one owned inactive task."""
+    try:
+        task = AutomationTask.objects.get(pk=pk, user=request.user)
+    except AutomationTask.DoesNotExist:
+        return JsonResponse({"error": "Task was not found."}, status=404)
+    if task.status in (
+        AutomationTask.Status.PENDING,
+        AutomationTask.Status.RUNNING,
+    ):
+        return JsonResponse(
+            {"error": "Stop the active task before deleting it."},
+            status=409,
+        )
+    task.delete()
+    return JsonResponse({"deleted": True, "id": pk})
 
 
 @login_required

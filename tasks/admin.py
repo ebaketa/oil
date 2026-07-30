@@ -38,13 +38,19 @@ class AutomationTaskAdmin(admin.ModelAdmin):
     list_display = (
         "name",
         "user",
+        "measurement_mode",
         "power_supply",
         "voltage_mode",
         "status",
         "created_at",
     )
-    list_filter = ("status", "voltage_mode", "voltage_source")
-    search_fields = ("name", "user__username")
+    list_filter = (
+        "status",
+        "measurement_mode",
+        "voltage_mode",
+        "voltage_source",
+    )
+    search_fields = ("name", "description", "user__username")
     inlines = (TaskInstrumentInline, TaskSampleInline)
 
 
