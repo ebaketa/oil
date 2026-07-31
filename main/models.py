@@ -56,11 +56,12 @@ class Instrument(models.Model):
 
         AGILENT_34401A = "agilent_34401a", "Agilent 34401A"
         KEYSIGHT_34461A = "keysight_34461a", "Keysight 34461A"
-        MOCK = "mock", "Mock instrument"
+        MOCK = "mock-dmm", "Mock DMM"
         MOCK_DC_POWER_SUPPLY = (
             "mock_dc_power_supply",
             "Mock DC Power Supply",
         )
+        RND_KA3005P = "rnd_ka3005p", "RND Lab 320-KA3005P"
 
     class Status(models.TextChoices):
         """Connection states shown in the instrument inventory."""
@@ -78,7 +79,7 @@ class Instrument(models.Model):
         max_length=255,
         help_text=(
             "Device path such as /dev/ttyUSB0 or /dev/usbtmc0, "
-            "mock://default, or mock-psu://default."
+            "mock-dmm://default, or mock-psu://default."
         ),
     )
     status = models.CharField(
@@ -112,6 +113,28 @@ class Instrument(models.Model):
     def supports_function(self, function: str) -> bool:
         """Return whether the configured driver supports a function."""
         return function in self.capabilities
+
+    @property
+    def is_power_supply(self) -> bool:
+        """Return whether the configured driver controls a DC power supply."""
+        from drivers.registry import DriverRegistry
+
+        driver_class = DriverRegistry.get(self.driver)
+        return getattr(driver_class, "DEVICE_TYPE", None) == "power_supply"
+
+    @property
+    def power_supply_voltage_limits(self):
+        """Return voltage bounds and resolution published by a PSU driver."""
+        from drivers.registry import DriverRegistry
+
+        driver_class = DriverRegistry.get(self.driver)
+        if getattr(driver_class, "DEVICE_TYPE", None) != "power_supply":
+            return None
+        return {
+            "minimum": driver_class.MIN_VOLTAGE,
+            "maximum": driver_class.MAX_VOLTAGE,
+            "step": driver_class.VOLTAGE_STEP,
+        }
 
     @property
     def status_badge(self):

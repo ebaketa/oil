@@ -149,6 +149,10 @@ class Agilent34401ADriver(BaseInstrumentDriver):
         """Return the instrument identity response."""
         return self.query("*IDN?")
 
+    def set_display_enabled(self, enabled: bool) -> None:
+        """Enable or disable front-panel display updates."""
+        self.write(f"DISP {'ON' if enabled else 'OFF'}")
+
     def _enter_remote(self) -> None:
         """Enter RS-232 remote mode using the model's proven command timing."""
         self.write("SYSTem:REMote")

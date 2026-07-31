@@ -27,6 +27,14 @@ class CsvEcho:
         return value
 
 
+def _voltage_decimal_places(instrument):
+    """Return the voltage precision published by a power-supply driver."""
+    limits = instrument.power_supply_voltage_limits
+    if limits is None:
+        return None
+    return max(0, -limits["step"].as_tuple().exponent)
+
+
 def _serialize_task(task, *, include_samples=False):
     """Return one task and optionally its stored samples."""
     task_instruments = list(
@@ -39,6 +47,9 @@ def _serialize_task(task, *, include_samples=False):
             "name": assignment.instrument.name,
             "driver": assignment.instrument.get_driver_display(),
             "configuration": assignment.configuration,
+            "voltage_decimals": _voltage_decimal_places(
+                assignment.instrument,
+            ),
         }
         for assignment in task_instruments
     ]
@@ -56,8 +67,41 @@ def _serialize_task(task, *, include_samples=False):
                         "name": instrument.name,
                         "driver": instrument.get_driver_display(),
                         "configuration": {},
+                        "voltage_decimals": _voltage_decimal_places(
+                            instrument,
+                        ),
                     },
                 )
+
+    result_columns = []
+    for instrument in serialized_instruments:
+        configuration = instrument["configuration"]
+        if configuration.get("readback_voltage", False):
+            result_columns.extend(
+                (
+                    {
+                        "assignment_id": instrument["assignment_id"],
+                        "parameter": "Voltage setpoint",
+                        "label": f'{instrument["name"]} — Set voltage',
+                        "decimals": instrument["voltage_decimals"],
+                    },
+                    {
+                        "assignment_id": instrument["assignment_id"],
+                        "parameter": "Output voltage readback",
+                        "label": f'{instrument["name"]} — Read voltage',
+                        "decimals": instrument["voltage_decimals"],
+                    },
+                ),
+            )
+        else:
+            result_columns.append(
+                {
+                    "assignment_id": instrument["assignment_id"],
+                    "parameter": None,
+                    "label": instrument["name"],
+                    "decimals": instrument["voltage_decimals"],
+                },
+            )
 
     payload = {
         "id": task.pk,
@@ -82,6 +126,13 @@ def _serialize_task(task, *, include_samples=False):
         "stop_voltage": str(task.stop_voltage),
         "voltage_step": str(task.voltage_step),
         "interval_seconds": task.interval_seconds,
+        "start_delay_seconds": task.start_delay_seconds,
+        "trigger_period": {
+            "hours": int(task.interval_seconds // 3600),
+            "minutes": int(task.interval_seconds % 3600 // 60),
+            "seconds": int(task.interval_seconds % 60),
+            "hundredths": int(round(task.interval_seconds * 100)) % 100,
+        },
         "sample_count": getattr(task, "sample_count", task.samples.count()),
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "finished_at": (
@@ -89,6 +140,7 @@ def _serialize_task(task, *, include_samples=False):
         ),
         "error": task.error,
         "instruments": serialized_instruments,
+        "result_columns": result_columns,
     }
     if include_samples:
         samples = []
@@ -178,6 +230,15 @@ def task_list(request):
                 "name": str(instrument),
                 "driver": instrument.driver,
                 "driver_label": instrument.get_driver_display(),
+                "is_power_supply": instrument.is_power_supply,
+                "voltage_limits": (
+                    {
+                        name: str(value)
+                        for name, value in (
+                            instrument.power_supply_voltage_limits or {}
+                        ).items()
+                    }
+                ),
                 "capabilities": {
                     name: {
                         "label": capability.label,
@@ -238,21 +299,34 @@ def task_create(request):
         for order, item in enumerate(submitted_instruments):
             instrument = instrument_map[item["instrument_id"]]
             config = item.get("configuration", {})
-            if instrument.driver == Instrument.Driver.MOCK_DC_POWER_SUPPLY:
+            if instrument.is_power_supply:
+                limits = instrument.power_supply_voltage_limits
                 mode = config.get("mode")
                 if mode not in AutomationTask.VoltageMode.values:
                     raise ValueError("Select a valid power supply mode.")
                 for name in ("start_voltage", "stop_voltage", "voltage_step"):
                     value = Decimal(str(config.get(name)))
                     if name == "voltage_step":
-                        if not Decimal("0.001") <= value <= Decimal("60"):
-                            raise ValueError("Voltage step must be 0.001–60 V.")
-                    elif not Decimal("0") <= value <= Decimal("60"):
-                        raise ValueError("Voltage must be 0–60 V.")
+                        if not limits["step"] <= value <= limits["maximum"]:
+                            raise ValueError(
+                                "Voltage step is outside the driver's range.",
+                            )
+                    elif not limits["minimum"] <= value <= limits["maximum"]:
+                        raise ValueError(
+                            "Voltage is outside the driver's range.",
+                        )
                     config[name] = str(value)
                 config["cycle_count"] = int(config.get("cycle_count", 1))
                 if not 1 <= config["cycle_count"] <= 100:
                     raise ValueError("Cycle count must be 1–100.")
+                readback_voltage = config.get("readback_voltage", False)
+                if readback_voltage in (True, "true"):
+                    readback_voltage = True
+                elif readback_voltage in (False, "false"):
+                    readback_voltage = False
+                else:
+                    raise ValueError("Select a valid voltage readback option.")
+                config["readback_voltage"] = readback_voltage
                 start = Decimal(config["start_voltage"])
                 stop = Decimal(config["stop_voltage"])
                 step = Decimal(config["voltage_step"])
@@ -285,6 +359,25 @@ def task_create(request):
                         "Only a Mock DMM can use a virtual source.",
                     )
                 config["source"] = source
+                display_off = config.get("display_off", False)
+                if display_off in (True, "true"):
+                    display_off = True
+                elif display_off in (False, "false"):
+                    display_off = False
+                else:
+                    raise ValueError("Select a valid display option.")
+                if (
+                    display_off
+                    and instrument.driver not in (
+                        Instrument.Driver.AGILENT_34401A,
+                        Instrument.Driver.KEYSIGHT_34461A,
+                    )
+                ):
+                    raise ValueError(
+                        "Display control is only available for Agilent 34401A "
+                        "and Keysight 34461A.",
+                    )
+                config["display_off"] = display_off
                 if function == "temperature":
                     minimum = Decimal(str(config.get("minimum")))
                     maximum = Decimal(str(config.get("maximum")))
@@ -308,7 +401,7 @@ def task_create(request):
     power_supplies = [
         instrument
         for _order, instrument, _config in normalized
-        if instrument.driver == Instrument.Driver.MOCK_DC_POWER_SUPPLY
+        if instrument.is_power_supply
     ]
     if len(power_supplies) > 1:
         return JsonResponse(
@@ -321,7 +414,11 @@ def task_create(request):
         if instrument.driver == Instrument.Driver.MOCK
         and config.get("function") == "dc_voltage"
     )
-    if has_virtual_meter and not power_supplies:
+    has_mock_supply = any(
+        instrument.driver == Instrument.Driver.MOCK_DC_POWER_SUPPLY
+        for instrument in power_supplies
+    )
+    if has_virtual_meter and not has_mock_supply:
         return JsonResponse(
             {"error": "Virtual voltage measurement requires a Mock PSU."},
             status=400,
@@ -354,6 +451,7 @@ def task_create(request):
             description=form.cleaned_data["description"],
             measurement_mode=form.cleaned_data["measurement_mode"],
             interval_seconds=form.cleaned_data["interval_seconds"],
+            start_delay_seconds=form.cleaned_data["start_delay_seconds"],
             requested_samples=form.cleaned_data["requested_samples"],
             power_supply=power_supply,
         )
@@ -429,7 +527,7 @@ def task_complete(request, pk):
         )
     task.status = AutomationTask.Status.COMPLETED
     task.save(update_fields=("status",))
-    return JsonResponse(_serialize_task(task))
+    return JsonResponse(_serialize_task(task, include_samples=True))
 
 
 @login_required
@@ -468,13 +566,37 @@ def task_export_csv(request, pk):
         return JsonResponse({"error": "Task was not found."}, status=404)
 
     assignments = list(task.task_instruments.all())
-    columns = [
-        (assignment.pk, assignment.instrument.name)
-        for assignment in assignments
-    ]
+    columns = []
+    for assignment in assignments:
+        if assignment.configuration.get("readback_voltage", False):
+            columns.extend(
+                (
+                    (
+                        assignment.pk,
+                        "Voltage setpoint",
+                        f"{assignment.instrument.name} — Set voltage",
+                        _voltage_decimal_places(assignment.instrument),
+                    ),
+                    (
+                        assignment.pk,
+                        "Output voltage readback",
+                        f"{assignment.instrument.name} — Read voltage",
+                        _voltage_decimal_places(assignment.instrument),
+                    ),
+                ),
+            )
+        else:
+            columns.append(
+                (
+                    assignment.pk,
+                    None,
+                    assignment.instrument.name,
+                    _voltage_decimal_places(assignment.instrument),
+                ),
+            )
     if not columns:
         columns = [
-            (key, instrument.name)
+            (key, None, instrument.name, None)
             for key, instrument in (
                 ("legacy-psu", task.power_supply),
                 ("legacy-voltage", task.voltage_meter),
@@ -491,15 +613,12 @@ def task_export_csv(request, pk):
                 "Time",
                 *(
                     safe_spreadsheet_text(instrument_name)
-                    for _key, instrument_name in columns
+                    for _key, _parameter, instrument_name, _decimals in columns
                 ),
             ),
         )
         for sample in task.samples.all():
-            readings = {
-                reading.task_instrument_id: reading
-                for reading in sample.readings.all()
-            }
+            sample_readings = list(sample.readings.all())
             if not assignments:
                 legacy_values = {
                     "legacy-psu": (
@@ -524,14 +643,23 @@ def task_export_csv(request, pk):
                         "%d.%m.%Y %H:%M:%S",
                     ),
                     *(
-                        (
-                            f"{readings[key].value} {readings[key].unit}"
-                            if key in readings
-                            else legacy_values.get(key, "")
+                        next(
+                            (
+                                f'{reading.value:.{decimals}f} {reading.unit}'
+                                if decimals is not None
+                                else f"{reading.value} {reading.unit}"
+                                for reading in sample_readings
+                                if reading.task_instrument_id == key
+                                and (
+                                    parameter is None
+                                    or reading.parameter == parameter
+                                )
+                            ),
+                            legacy_values.get(key, "")
                             if not assignments
-                            else ""
+                            else "",
                         )
-                        for key, _instrument_name in columns
+                        for key, parameter, _instrument_name, decimals in columns
                     ),
                 ),
             )

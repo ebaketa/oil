@@ -3,9 +3,26 @@
 from django.utils import timezone
 
 from drivers.exceptions import DriverError
+from drivers.factory import create_driver
 from services.connection_manager import ConnectionManager
 
 from .models import Instrument
+
+
+def test_instrument_configuration(instrument: Instrument) -> str:
+    """Identify an unsaved instrument without persisting test state."""
+    driver = None
+    try:
+        driver = create_driver(instrument)
+        driver.connect()
+        return driver.identify()
+    except Exception as exc:
+        if isinstance(exc, DriverError):
+            raise
+        raise DriverError("The connection test could not be completed.") from exc
+    finally:
+        if driver is not None:
+            driver.disconnect()
 
 
 def connect_instrument(instrument: Instrument) -> None:

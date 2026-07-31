@@ -1,6 +1,6 @@
 # OIL Development Handoff
 
-Last updated: 2026-07-30
+Last updated: 2026-07-31
 
 ## Current baseline
 
@@ -12,6 +12,18 @@ Last updated: 2026-07-30
 
 ## Work completed after 0.0.8
 
+- Added the physical RND Lab 320-KA3005P power-supply driver over its
+  documented 9600-baud serial protocol, with voltage/current programming,
+  output control, readback, validation, and safe disconnect behavior.
+- Renamed the generic Mock instrument to Mock DMM and migrated existing driver
+  keys and Mock DMM address schemes.
+- Added an authenticated, read-only instrument detail page and restricted
+  instrument management and driver tests to administrators.
+- New instruments must pass a connection test for their current driver and
+  address before they can be saved.
+- Added administrator instrument deletion with protected-use handling.
+- Added selectable keyboard and double-click navigation to instrument and
+  measurement tables.
 - Simplified the new-task form to use a task name and optional short
   description.
 - Added Single, Continuous, and Loop task execution modes.
@@ -33,6 +45,9 @@ Last updated: 2026-07-30
 - `tasks.0003_automationtask_description`
 - `tasks.0004_automationtask_measurement_mode`
 - `tasks.0005_alter_taskreading_task_instrument`
+- `main.0013_rename_mock_driver_to_mock_dmm`
+- `main.0014_rename_mock_dmm_address_scheme`
+- `main.0015_alter_instrument_driver`
 
 Always run:
 
@@ -58,7 +73,7 @@ after pulling these changes.
   .venv/bin/python manage.py test
   ```
 
-- The latest complete run passed 181 tests.
+- The latest complete run passed 205 tests.
 
 ## Data synchronization context
 

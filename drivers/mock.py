@@ -55,22 +55,24 @@ class MockInstrumentDriver(BaseInstrumentDriver):
 
     def __init__(
         self,
-        address: str = "mock://default",
+        address: str = "mock-dmm://default",
         *,
         readings: Iterable[float] | None = None,
         transport: InstrumentTransport | None = None,
     ) -> None:
         """Configure a deterministic simulated instrument."""
         super().__init__()
-        if not address.startswith("mock://"):
-            raise ValueError("Mock driver addresses must start with mock://.")
+        if not address.startswith("mock-dmm://"):
+            raise ValueError(
+                "Mock DMM addresses must start with mock-dmm://.",
+            )
 
         custom_values = None if readings is None else tuple(readings)
         if custom_values is not None and not custom_values:
             raise ValueError("Mock driver readings cannot be empty.")
 
         self.address = address
-        self.profile = address.removeprefix("mock://") or "default"
+        self.profile = address.removeprefix("mock-dmm://") or "default"
         self._readings = (
             cycle(custom_values)
             if custom_values is not None

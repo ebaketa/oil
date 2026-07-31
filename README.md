@@ -8,10 +8,12 @@ workflows.
 The current application provides authenticated Dashboard, instrument inventory,
 user profile, About, and Contact pages. Physical drivers support DC voltage,
 AC voltage, and two-wire resistance on the Agilent 34401A over serial/FTDI and
-the Keysight 34461A over Linux USBTMC. The deterministic Mock instrument also
+the Keysight 34461A over Linux USBTMC. The deterministic Mock DMM also
 supports DC current, AC current, and temperature for hardware-free development.
 A separate Mock DC Power Supply provides a programmable 0 to 60 V output with
-1 mV resolution and a safe disabled-by-default output state.
+1 mV resolution and a safe disabled-by-default output state. The physical RND
+Lab 320-KA3005P driver controls its 0 to 30 V, 0 to 5 A output over a 9600-baud
+USB virtual COM or RS-232 connection.
 
 The Tasks workspace provides an instrument builder: users select inventory
 instruments one at a time, add each to the task, and configure it in a nested

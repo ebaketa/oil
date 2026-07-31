@@ -34,8 +34,9 @@ Browser → Views → Services → ConnectionManager → Drivers → Instrument
   while protecting referenced instrument and run records from deletion.
 - `drivers` contains hardware communication isolated from Django models and
   views. The first drivers support the Agilent 34401A over serial/FTDI and the
-  Keysight 34461A over Linux USBTMC, plus a deterministic Mock instrument for
-  hardware-free development.
+  Keysight 34461A over Linux USBTMC, plus a deterministic Mock DMM for
+  hardware-free development and the RND Lab 320-KA3005P power supply over
+  serial.
 - `drivers/transports` owns reusable communication channels for Serial/FTDI,
   Linux USBTMC, and in-memory Mock operation.
 - `DriverRegistry` maps persistent inventory driver names to implementation
@@ -83,11 +84,11 @@ functions on the server, and the driver details page lists them for users.
 Hardware-independent unit tests use simulated serial and USBTMC connections.
 Application views do not communicate with either instrument directly.
 
-The registered Mock driver uses `mock://default` and cycles through stable,
+The registered Mock DMM driver uses `mock-dmm://default` and cycles through stable,
 function-specific readings for DC voltage, AC voltage, DC current, AC current,
 resistance, and temperature while following the same connect, identify,
 measure, and disconnect lifecycle as physical hardware. The
-`mock://timeout` and `mock://connection-error` profiles support deterministic
+`mock-dmm://timeout` and `mock-dmm://connection-error` profiles support deterministic
 failure-path testing.
 
 The separate Mock DC Power Supply uses `mock-psu://default`. It provides a
@@ -96,6 +97,12 @@ Its output starts disabled, measures zero volts while disabled, follows the
 configured setpoint while enabled, and is disabled automatically whenever its
 connection closes. The `mock-psu://connection-error` profile provides a
 deterministic connection failure.
+
+The RND Lab 320-KA3005P driver uses a USB virtual COM or RS-232 device path
+such as `/dev/ttyUSB0`. It opens the documented 9600-baud 8N1 connection,
+programs channel-one voltage in 0.01 V steps and current in 0.001 A steps,
+controls the output, and reads actual output voltage and current. Its Task
+builder voltage range is limited to the physical 0–30 V capability.
 
 ## Automation tasks
 

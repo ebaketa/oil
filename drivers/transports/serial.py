@@ -21,6 +21,9 @@ class SerialTransport(InstrumentTransport):
         baudrate: int = 9600,
         timeout: float = 1,
         response_timeout: float = 10,
+        stopbits: float = serial.STOPBITS_TWO,
+        write_termination: str = "\n",
+        response_termination: str | None = "\n",
         serial_factory: Callable[..., Any] | None = None,
     ) -> None:
         """Store serial settings without opening the device."""
@@ -28,6 +31,9 @@ class SerialTransport(InstrumentTransport):
         self.baudrate = baudrate
         self.timeout = timeout
         self.response_timeout = response_timeout
+        self.stopbits = stopbits
+        self.write_termination = write_termination
+        self.response_termination = response_termination
         self._serial_factory = serial_factory
         self.connection: Any | None = None
 
@@ -47,7 +53,7 @@ class SerialTransport(InstrumentTransport):
                 baudrate=self.baudrate,
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
-                stopbits=serial.STOPBITS_TWO,
+                stopbits=self.stopbits,
                 timeout=self.timeout,
             )
         except (OSError, serial.SerialException) as exc:
@@ -72,7 +78,8 @@ class SerialTransport(InstrumentTransport):
         if not self.is_open:
             raise CommunicationError("The serial transport is not open.")
         try:
-            self.connection.write(f"{command.rstrip()}\n".encode())
+            payload = f"{command.rstrip()}{self.write_termination}".encode()
+            self.connection.write(payload)
         except (OSError, serial.SerialException) as exc:
             raise CommunicationError(
                 f"Could not write to serial device {self.port}."
@@ -93,7 +100,10 @@ class SerialTransport(InstrumentTransport):
                     time.sleep(0.1)
                 if self.connection.in_waiting <= 0:
                     raise CommunicationError("The serial response timed out.")
-            response = self.connection.readline()
+            if self.response_termination is None:
+                response = self._read_raw_response(timeout)
+            else:
+                response = self.connection.readline()
         except CommunicationError:
             raise
         except (OSError, serial.SerialException) as exc:
@@ -104,6 +114,24 @@ class SerialTransport(InstrumentTransport):
         if not response:
             raise CommunicationError("The serial response timed out.")
         return response.decode("utf-8", errors="replace").strip()
+
+    def _read_raw_response(self, timeout: float | None) -> bytes:
+        """Collect an unterminated response until the input becomes quiet."""
+        deadline = time.monotonic() + (
+            timeout if timeout is not None else self.timeout
+        )
+        quiet_deadline = None
+        response = bytearray()
+        while time.monotonic() < deadline:
+            available = self.connection.in_waiting
+            if available > 0:
+                response.extend(self.connection.read(available))
+                quiet_deadline = time.monotonic() + 0.02
+                continue
+            if response and time.monotonic() >= quiet_deadline:
+                break
+            time.sleep(0.005)
+        return bytes(response)
 
     def reset_input_buffer(self) -> None:
         """Discard unread serial input."""

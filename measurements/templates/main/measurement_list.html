@@ -1,5 +1,6 @@
 {# Measurements domain template. #}
 {% extends "main/base.html" %}
+{% load static %}
 
 {% block title %}
 Measurements
@@ -15,12 +16,6 @@ Measurements
         </div>
     </div>
     <div class="d-flex gap-2">
-        <a
-            class="btn btn-outline-success"
-            href="{% url 'measurement_export_csv' %}"
-        >
-            Download CSV
-        </a>
         <a class="btn btn-outline-secondary" href="{% url 'dashboard' %}">
             Back
         </a>
@@ -32,6 +27,12 @@ Measurements
         </a>
         <a class="btn btn-primary" href="{% url 'measurement_loop' %}">
             Loop
+        </a>
+        <a
+            class="btn btn-outline-success"
+            href="{% url 'measurement_export_csv' %}"
+        >
+            Download CSV
         </a>
     </div>
 </div>
@@ -49,7 +50,9 @@ Measurements
         </thead>
         <tbody>
             {% for measurement in measurements %}
-                <tr>
+                <tr class="measurement-row{% if forloop.first %} table-active{% endif %}"
+                    tabindex="0"
+                    aria-selected="{% if forloop.first %}true{% else %}false{% endif %}">
                     <td>{{ measurement.timestamp }}</td>
                     <td>{{ measurement.instrument.name }}</td>
                     <td>{{ measurement.parameter }}</td>
@@ -67,4 +70,8 @@ Measurements
     </table>
 </div>
 
+{% endblock %}
+
+{% block scripts %}
+<script src="{% static 'main/js/measurement-list.js' %}?v=1"></script>
 {% endblock %}

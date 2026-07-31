@@ -12,7 +12,9 @@
         "#saved-task-pane-template",
     );
     const statusFilter = document.querySelector("#task-status-filter");
+    const savedTaskTable = document.querySelector("#saved-task-table");
     const taskRows = Array.from(document.querySelectorAll(".task-row"));
+    const isAdmin = savedTaskTable?.dataset.isAdmin === "true";
     const availableInstrumentData = document.querySelector(
         "#task-available-instruments",
     );
@@ -53,6 +55,25 @@
             + `${date.getFullYear()} ${pad(date.getHours())}:`
             + `${pad(date.getMinutes())}:${pad(date.getSeconds())}`
         );
+    };
+
+    const formatElapsed = (startedAt, finishedAt = null) => {
+        if (!startedAt) {
+            return "—";
+        }
+        const started = new Date(startedAt).getTime();
+        const finished = finishedAt
+            ? new Date(finishedAt).getTime()
+            : Date.now();
+        const totalSeconds = Math.max(
+            0,
+            Math.floor((finished - started) / 1000),
+        );
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        const pad = (part) => String(part).padStart(2, "0");
+        return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
     };
 
     const activateTab = (trigger) => {
@@ -158,15 +179,36 @@
         fields.className = "row g-3";
         panel.append(fields);
 
-        if (instrument.driver === "mock_dc_power_supply") {
+        if (instrument.is_power_supply) {
+            const limits = instrument.voltage_limits;
             addField(fields, "Mode", "mode", "sweep", [
                 ["fixed", "Fixed"],
                 ["sweep", "Sweep"],
                 ["cycle", "Cycle"],
             ]);
-            addField(fields, "Start voltage (V)", "start_voltage", "0.000");
-            addField(fields, "Stop voltage (V)", "stop_voltage", "10.000");
-            addField(fields, "Voltage step (V)", "voltage_step", "1.000");
+            const start = addField(
+                fields,
+                "Start voltage (V)",
+                "start_voltage",
+                limits.minimum,
+            );
+            const stop = addField(
+                fields,
+                "Stop voltage (V)",
+                "stop_voltage",
+                String(Math.min(10, Number(limits.maximum))),
+            );
+            const step = addField(
+                fields,
+                "Voltage step (V)",
+                "voltage_step",
+                limits.step,
+            );
+            [start, stop, step].forEach((field) => {
+                field.min = limits.minimum;
+                field.max = limits.maximum;
+                field.step = limits.step;
+            });
             const cycles = addField(
                 fields,
                 "Cycle count",
@@ -176,6 +218,16 @@
             cycles.step = "1";
             cycles.min = "1";
             cycles.max = "100";
+            addField(
+                fields,
+                "Output voltage readback",
+                "readback_voltage",
+                "false",
+                [
+                    ["false", "No"],
+                    ["true", "Yes — read after each trigger"],
+                ],
+            );
             return;
         }
 
@@ -191,7 +243,7 @@
                 capabilityOptions,
             );
             const sourceOptions = [["external", "External"]];
-            if (instrument.driver === "mock") {
+            if (instrument.driver === "mock-dmm") {
                 sourceOptions.push(["virtual", "Virtual power supply"]);
             }
             addField(
@@ -201,6 +253,21 @@
                 "external",
                 sourceOptions,
             );
+            if ([
+                "agilent_34401a",
+                "keysight_34461a",
+            ].includes(instrument.driver)) {
+                addField(
+                    fields,
+                    "Front-panel display during task",
+                    "display_off",
+                    "false",
+                    [
+                        ["false", "On"],
+                        ["true", "Off"],
+                    ],
+                );
+            }
             const minimum = addField(
                 fields,
                 "Minimum temperature (°C)",
@@ -355,11 +422,9 @@
         });
         const form = pane.querySelector(".task-create-form");
         const measurementMode = form.elements.measurement_mode;
-        const intervalField = pane.querySelector(".task-interval-field");
         const countField = pane.querySelector(".task-count-field");
         const updateMeasurementFields = () => {
             const mode = measurementMode.value;
-            intervalField.classList.toggle("d-none", mode === "single");
             countField.classList.toggle("d-none", mode !== "loop");
         };
         measurementMode.addEventListener("change", updateMeasurementFields);
@@ -427,7 +492,7 @@
         selectedRow.setAttribute("aria-selected", "true");
         openButton.disabled = false;
         const active = ["pending", "running"].includes(row.dataset.status);
-        deleteButton.disabled = active;
+        deleteButton.disabled = active && !isAdmin;
         deleteButton.title = active
             ? "Stop the active task before deleting it."
             : "";
@@ -440,6 +505,7 @@
         row.dataset.statusLabel = task.status_label;
         row.dataset.started = formatDateTime(task.started_at);
         row.dataset.measurementCount = task.sample_count;
+        row.querySelector("td").textContent = task.id;
         row.querySelector("th").textContent = task.name;
         row.querySelector(".task-row-started").textContent = (
             formatDateTime(task.started_at)
@@ -490,6 +556,7 @@
             row.className = "task-row";
             row.tabIndex = 0;
             row.setAttribute("aria-selected", "false");
+            const identifier = document.createElement("td");
             const name = document.createElement("th");
             name.scope = "row";
             const started = document.createElement("td");
@@ -498,7 +565,7 @@
             const state = document.createElement("span");
             state.className = "task-row-state badge";
             stateCell.append(state);
-            row.append(name, started, stateCell);
+            row.append(identifier, name, started, stateCell);
             document.querySelector("#saved-task-empty-row")?.remove();
             document.querySelector("#saved-task-table tbody").prepend(row);
             taskRows.unshift(row);
@@ -539,6 +606,10 @@
         pane.querySelector(".saved-task-started").textContent = (
             formatDateTime(task.started_at)
         );
+        pane.querySelector(".saved-task-elapsed").textContent = formatElapsed(
+            task.started_at,
+            task.finished_at,
+        );
         pane.querySelector(".saved-task-count").textContent = (
             task.sample_count
         );
@@ -556,44 +627,62 @@
         const rows = pane.querySelector(".task-sample-rows");
         const header = pane.querySelector(".task-results-header");
         header.replaceChildren();
+        const idHeader = document.createElement("th");
+        idHeader.textContent = "ID";
+        header.append(idHeader);
         const timeHeader = document.createElement("th");
         timeHeader.textContent = "Time";
         header.append(timeHeader);
         const instruments = task.instruments || [];
-        instruments.forEach((instrument) => {
+        const resultColumns = task.result_columns || instruments.map(
+            (instrument) => ({
+                assignment_id: instrument.assignment_id,
+                parameter: null,
+                label: instrument.name,
+            }),
+        );
+        resultColumns.forEach((column) => {
             const cell = document.createElement("th");
-            cell.textContent = instrument.name;
-            cell.title = instrument.driver;
+            cell.textContent = column.label;
             header.append(cell);
         });
 
         rows.replaceChildren();
-        [...(task.samples || [])].reverse().forEach((sample) => {
-            const row = document.createElement("tr");
-            const timeCell = document.createElement("td");
-            timeCell.textContent = formatDateTime(sample.timestamp);
-            row.append(timeCell);
-            const readingsByInstrument = new Map(
-                (sample.readings || []).map((reading) => [
-                    String(reading.assignment_id),
-                    reading,
-                ]),
-            );
-            instruments.forEach((instrument) => {
-                const cell = document.createElement("td");
-                const reading = readingsByInstrument.get(
-                    String(instrument.assignment_id),
-                );
-                if (reading) {
-                    cell.textContent = `${reading.value} ${reading.unit}`;
-                    cell.title = reading.parameter;
-                } else {
-                    cell.textContent = "—";
-                }
-                row.append(cell);
+        [...(task.samples || [])]
+            .sort((left, right) => right.index - left.index)
+            .forEach((sample) => {
+                const row = document.createElement("tr");
+                const idCell = document.createElement("td");
+                idCell.textContent = sample.index;
+                row.append(idCell);
+                const timeCell = document.createElement("td");
+                timeCell.textContent = formatDateTime(sample.timestamp);
+                row.append(timeCell);
+                resultColumns.forEach((column) => {
+                    const cell = document.createElement("td");
+                    const reading = (sample.readings || []).find(
+                        (candidate) => (
+                            String(candidate.assignment_id)
+                                === String(column.assignment_id)
+                            && (
+                                !column.parameter
+                                || candidate.parameter === column.parameter
+                            )
+                        ),
+                    );
+                    if (reading) {
+                        const value = Number.isInteger(column.decimals)
+                            ? Number(reading.value).toFixed(column.decimals)
+                            : reading.value;
+                        cell.textContent = `${value} ${reading.unit}`;
+                        cell.title = reading.parameter;
+                    } else {
+                        cell.textContent = "—";
+                    }
+                    row.append(cell);
+                });
+                rows.append(row);
             });
-            rows.append(row);
-        });
     };
 
     const fetchTask = async (taskId, pane) => {
@@ -775,6 +864,14 @@
             openButton.disabled = true;
             deleteButton.disabled = true;
         }
+        if (!selectedRow) {
+            const firstVisibleRow = taskRows.find(
+                (row) => !row.classList.contains("d-none"),
+            );
+            if (firstVisibleRow) {
+                selectRow(firstVisibleRow);
+            }
+        }
     };
 
     const deleteSelectedTask = async () => {
@@ -834,12 +931,14 @@
                 emptyRow.id = "saved-task-empty-row";
                 const cell = document.createElement("td");
                 cell.className = "text-center text-muted py-4";
-                cell.colSpan = 3;
+                cell.colSpan = 4;
                 cell.textContent = "No saved tasks are available.";
                 emptyRow.append(cell);
                 document.querySelector("#saved-task-table tbody").append(
                     emptyRow,
                 );
+            } else {
+                filterRows();
             }
         } catch (error) {
             window.alert(error.message);
@@ -850,6 +949,9 @@
     };
 
     taskRows.forEach(bindTaskRow);
+    if (taskRows.length) {
+        selectRow(taskRows[0]);
+    }
 
     newButton.addEventListener("click", openNewTask);
     openButton.addEventListener("click", () => openSavedTask(selectedRow));

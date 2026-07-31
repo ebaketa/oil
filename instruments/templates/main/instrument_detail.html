@@ -1,0 +1,126 @@
+{# Read-only instrument inventory information. #}
+{% extends "main/base.html" %}
+
+{% block title %}
+{{ instrument.name }}
+{% endblock %}
+
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="mb-0">{{ instrument.name }}</h2>
+    <div class="d-flex gap-2">
+        <a class="btn btn-outline-secondary" href="{% url 'instrument_list' %}">
+            Back
+        </a>
+        {% if user.is_staff %}
+            <a class="btn btn-outline-primary"
+               href="{% url 'instrument_edit' instrument.pk %}">
+                Edit instrument
+            </a>
+            <a class="btn btn-primary"
+               href="{% url 'instrument_driver' instrument.pk %}">
+                Driver settings
+            </a>
+        {% endif %}
+    </div>
+</div>
+
+<h3 class="h5 mb-3">Instrument information</h3>
+<dl class="row mb-4">
+    <dt class="col-sm-4">ID</dt>
+    <dd class="col-sm-8">{{ instrument.pk }}</dd>
+
+    <dt class="col-sm-4">Manufacturer</dt>
+    <dd class="col-sm-8">{{ instrument.manufacturer }}</dd>
+
+    <dt class="col-sm-4">Model</dt>
+    <dd class="col-sm-8">{{ instrument.model_name }}</dd>
+
+    <dt class="col-sm-4">Serial number</dt>
+    <dd class="col-sm-8">{{ instrument.serial_number|default:"—" }}</dd>
+
+    <dt class="col-sm-4">Driver</dt>
+    <dd class="col-sm-8">{{ instrument.get_driver_display }}</dd>
+
+    <dt class="col-sm-4">Address</dt>
+    <dd class="col-sm-8"><code>{{ instrument.address }}</code></dd>
+
+    <dt class="col-sm-4">Status</dt>
+    <dd class="col-sm-8">
+        {% if instrument.is_online %}
+            <span class="badge text-bg-success">Online</span>
+        {% else %}
+            <span class="badge text-bg-info">Reachable</span>
+        {% endif %}
+    </dd>
+
+    <dt class="col-sm-4">Description</dt>
+    <dd class="col-sm-8">{{ instrument.description|default:"—"|linebreaksbr }}</dd>
+</dl>
+
+<hr class="my-4">
+
+<h3 class="h5 mb-3">Driver information</h3>
+<dl class="row mb-4">
+    <dt class="col-sm-4">Driver</dt>
+    <dd class="col-sm-8">{{ instrument.get_driver_display }}</dd>
+
+    <dt class="col-sm-4">Driver status</dt>
+    <dd class="col-sm-8">
+        <span class="badge text-bg-{{ instrument.status_badge }}">
+            {{ instrument.get_status_display }}
+        </span>
+    </dd>
+
+    <dt class="col-sm-4">Last tested</dt>
+    <dd class="col-sm-8">
+        {{ instrument.last_driver_test_at|default:"Never" }}
+    </dd>
+
+    <dt class="col-sm-4">Identification</dt>
+    <dd class="col-sm-8">
+        {{ instrument.last_identification|default:"Not available" }}
+    </dd>
+
+    {% if instrument.last_driver_error %}
+        <dt class="col-sm-4">Last error</dt>
+        <dd class="col-sm-8 text-danger">
+            {{ instrument.last_driver_error }}
+        </dd>
+    {% endif %}
+</dl>
+
+<h4 class="h6">Supported measurement functions</h4>
+<div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+        <thead>
+            <tr>
+                <th scope="col">Function</th>
+                <th scope="col">Unit</th>
+                <th scope="col">Autorange</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for function_name, capability in capabilities.items %}
+                <tr>
+                    <td data-function="{{ function_name }}">
+                        {{ capability.label }}
+                    </td>
+                    <td>{{ capability.unit }}</td>
+                    <td>
+                        {% if capability.autorange %}Yes{% else %}No{% endif %}
+                    </td>
+                </tr>
+            {% empty %}
+                <tr>
+                    <td class="text-muted text-center" colspan="3">
+                        No measurement functions are available.
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}

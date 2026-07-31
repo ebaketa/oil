@@ -3,7 +3,8 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from decimal import Decimal
-from itertools import cycle, islice
+from itertools import chain, islice, repeat
+from time import monotonic
 from threading import Event, Lock
 
 from django.db import close_old_connections
@@ -39,9 +40,14 @@ def voltage_sequence(task: AutomationTask) -> tuple[Decimal, ...]:
     if task.voltage_mode == AutomationTask.VoltageMode.SWEEP:
         return tuple(values)
 
-    reverse_values = values[-2:0:-1]
-    cycle = values + reverse_values
-    return tuple(cycle * task.cycle_count)
+    reverse_values = values[-2::-1]
+    complete_cycle = values + reverse_values
+    if task.cycle_count == 1:
+        return tuple(complete_cycle)
+    subsequent_cycle = values[1:] + reverse_values
+    return tuple(
+        complete_cycle + subsequent_cycle * (task.cycle_count - 1),
+    )
 
 
 def measurement_sequence(task, base_sequence):
@@ -50,9 +56,14 @@ def measurement_sequence(task, base_sequence):
         return base_sequence[:1]
     if task.measurement_mode == AutomationTask.MeasurementMode.LOOP:
         return tuple(
-            islice(cycle(base_sequence), task.requested_samples),
+            islice(
+                chain(base_sequence, repeat(base_sequence[-1])),
+                task.requested_samples,
+            ),
         )
-    return cycle(base_sequence)
+    if len(base_sequence) > 1:
+        return base_sequence
+    return repeat(base_sequence[-1])
 
 
 def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
@@ -89,8 +100,7 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
         (
             assignment
             for assignment in assignments
-            if assignment.instrument.driver
-            == assignment.instrument.Driver.MOCK_DC_POWER_SUPPLY
+            if assignment.instrument.is_power_supply
         ),
         None,
     )
@@ -142,14 +152,21 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
                 )
                 for instrument_id, instrument in instruments.items()
             }
+            for assignment in assignments:
+                driver = drivers[assignment.instrument_id]
+                if assignment.configuration.get("display_off", False):
+                    stack.callback(driver.set_display_enabled, True)
+                    driver.set_display_enabled(False)
+                prepare = getattr(driver, "prepare_measurement", None)
+                function = assignment.configuration.get("function")
+                if prepare is not None and function:
+                    prepare(function)
             supply_id = (
                 supply_assignment.instrument_id
                 if supply_assignment
                 else task.power_supply_id
             )
             supply = drivers.get(supply_id)
-            if supply:
-                supply.enable_output()
 
             base_sequence = (
                 voltage_sequence(task)
@@ -157,20 +174,47 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
                 else (Decimal("0"),)
             )
             sequence = measurement_sequence(task, base_sequence)
+            trigger_started = monotonic() + task.start_delay_seconds
             for index, voltage in enumerate(sequence, start=1):
+                trigger_deadline = (
+                    trigger_started + (index - 1) * task.interval_seconds
+                )
+                wait_seconds = max(0, trigger_deadline - monotonic())
+                if wait_seconds and event.wait(wait_seconds):
+                    task.status = AutomationTask.Status.STOPPED
+                    break
                 task.refresh_from_db(fields=("stop_requested",))
                 if event.is_set() or task.stop_requested:
                     task.status = AutomationTask.Status.STOPPED
                     break
 
+                triggered_at = timezone.now()
                 if supply:
                     supply.set_voltage(voltage)
+                    if index == 1:
+                        supply.enable_output()
+                    if (
+                        supply_assignment
+                        and supply_assignment.configuration.get(
+                            "readback_voltage",
+                            False,
+                        )
+                    ):
+                        settling_seconds = getattr(
+                            supply,
+                            "VOLTAGE_SETTLING_SECONDS",
+                            0,
+                        )
+                        if settling_seconds and event.wait(settling_seconds):
+                            task.status = AutomationTask.Status.STOPPED
+                            break
                 measured_voltage = None
                 temperature = None
                 sample = TaskSample.objects.create(
                     task=task,
                     index=index,
                     voltage_setpoint=voltage,
+                    timestamp=triggered_at,
                 )
 
                 if flexible:
@@ -183,6 +227,19 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
                                 value=voltage,
                                 unit="V",
                             )
+                            if assignment.configuration.get(
+                                "readback_voltage",
+                                False,
+                            ):
+                                TaskReading.objects.create(
+                                    sample=sample,
+                                    task_instrument=assignment,
+                                    parameter="Output voltage readback",
+                                    value=Decimal(
+                                        str(supply.measure_output_voltage()),
+                                    ),
+                                    unit="V",
+                                )
                             continue
                         config = assignment.configuration
                         function = config["function"]
@@ -244,14 +301,6 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
                     update_fields=("measured_voltage", "temperature"),
                 )
 
-                should_wait = (
-                    task.measurement_mode
-                    == AutomationTask.MeasurementMode.CONTINUOUS
-                    or index < len(sequence)
-                )
-                if should_wait and event.wait(task.interval_seconds):
-                    task.status = AutomationTask.Status.STOPPED
-                    break
             else:
                 task.status = AutomationTask.Status.COMPLETED
 
@@ -297,3 +346,17 @@ class TaskRunner:
             event = cls._events.get(task_id)
             if event:
                 event.set()
+                return
+
+        # In-process events disappear when the application server restarts.
+        # Finalize a persisted active task when no local worker remains.
+        AutomationTask.objects.filter(
+            pk=task_id,
+            status__in=(
+                AutomationTask.Status.PENDING,
+                AutomationTask.Status.RUNNING,
+            ),
+        ).update(
+            status=AutomationTask.Status.STOPPED,
+            finished_at=timezone.now(),
+        )

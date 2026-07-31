@@ -8,9 +8,19 @@ urlpatterns = [
     path("instruments/", views.instrument_list, name="instrument_list"),
     path("instruments/add/", views.instrument_create, name="instrument_create"),
     path(
+        "instruments/<int:pk>/",
+        views.instrument_detail,
+        name="instrument_detail",
+    ),
+    path(
         "instruments/<int:pk>/edit/",
         views.instrument_edit,
         name="instrument_edit",
+    ),
+    path(
+        "instruments/<int:pk>/delete/",
+        views.instrument_delete,
+        name="instrument_delete",
     ),
     path(
         "instruments/<int:pk>/driver/",

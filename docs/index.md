@@ -6,7 +6,8 @@ laboratory instrument workflows.
 The project is currently in an early development stage. Authenticated users can
 manage a shared instrument inventory and run Single, Continuous, and Loop
 measurements. Drivers support the Agilent 34401A over serial/FTDI, the Keysight
-34461A over Linux USBTMC, and a deterministic Mock instrument. Stored
+34461A over Linux USBTMC, the RND Lab 320-KA3005P power supply over serial, and
+a deterministic Mock DMM. Stored
 measurements can be queried through JSON or downloaded as CSV.
 
 ## Documentation workflow

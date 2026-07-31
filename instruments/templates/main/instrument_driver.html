@@ -16,10 +16,12 @@ Driver | {{ instrument.name }}
         <a class="btn btn-outline-secondary" href="{% url 'instrument_list' %}">
             Back
         </a>
-        <a class="btn btn-outline-primary"
-           href="{% url 'instrument_edit' instrument.pk %}">
-            Edit instrument
-        </a>
+        {% if user.is_staff %}
+            <a class="btn btn-outline-primary"
+               href="{% url 'instrument_edit' instrument.pk %}">
+                Edit instrument
+            </a>
+        {% endif %}
     </div>
 </div>
 
@@ -28,9 +30,6 @@ Driver | {{ instrument.name }}
         <dl class="row mb-0">
             <dt class="col-sm-4">Driver</dt>
             <dd class="col-sm-8">{{ instrument.get_driver_display }}</dd>
-
-            <dt class="col-sm-4">Address</dt>
-            <dd class="col-sm-8"><code>{{ instrument.address }}</code></dd>
 
             <dt class="col-sm-4">Status</dt>
             <dd class="col-sm-8">
@@ -92,40 +91,6 @@ Driver | {{ instrument.name }}
                 </tbody>
             </table>
         </div>
-    </div>
-</div>
-
-<div class="card shadow-sm">
-    <div class="card-body">
-        <h3 class="h5">Connection test</h3>
-        <p class="text-muted">
-            Opens the configured device, sends <code>*IDN?</code>, reads its
-            identity, returns front-panel control with <code>SYST:LOC</code>,
-            and closes the connection without changing measurement settings.
-        </p>
-        <form method="post"
-              action="{% url 'instrument_driver_test' instrument.pk %}">
-            {% csrf_token %}
-            <button class="btn btn-primary" type="submit">Test driver</button>
-        </form>
-    </div>
-</div>
-
-<div class="card shadow-sm mt-4">
-    <div class="card-body">
-        <h3 class="h5">DC Voltage Auto mode</h3>
-        <p class="text-muted">
-            Removes stale SCPI errors, selects DC voltage with autorange,
-            verifies each new command, and reads the function and autorange
-            state back from the instrument.
-        </p>
-        <form method="post"
-              action="{% url 'instrument_driver_test_dcv' instrument.pk %}">
-            {% csrf_token %}
-            <button class="btn btn-primary" type="submit">
-                Test DCV Auto
-            </button>
-        </form>
     </div>
 </div>
 

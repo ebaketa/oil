@@ -18,7 +18,7 @@ from .models import (
     TaskReading,
     TaskSample,
 )
-from .runner import run_automation_task, voltage_sequence
+from .runner import measurement_sequence, run_automation_task, voltage_sequence
 
 
 class TaskViewTests(TestCase):
@@ -35,7 +35,7 @@ class TaskViewTests(TestCase):
             manufacturer="OIL",
             model_name="Mock",
             driver=Instrument.Driver.MOCK,
-            address="mock://default",
+            address="mock-dmm://default",
         )
         self.power_supply = Instrument.objects.create(
             name="Task PSU",
@@ -87,19 +87,23 @@ class TaskViewTests(TestCase):
         self.assertContains(response, 'id="saved-task-pane-template"')
         self.assertContains(response, 'id="saved-tasks-tab"')
         self.assertContains(response, 'id="task-status-filter"')
-        self.assertContains(response, "tasks/js/task_tabs.js?v=6")
+        self.assertContains(response, "tasks/js/task_tabs.js?v=18")
         self.assertContains(response, "task-stop-button")
         self.assertContains(response, "task-complete-button")
+        self.assertContains(response, "saved-task-elapsed")
         self.assertContains(response, "Add instrument")
         self.assertContains(response, "task-instrument-select")
         self.assertContains(response, "task-instrument-tabs")
         self.assertContains(response, "Task name")
         self.assertContains(response, "Short description")
         self.assertContains(response, "Measurement type")
+        self.assertContains(response, "Start delay (seconds)")
         self.assertContains(response, "Single")
         self.assertContains(response, "Continuous")
         self.assertContains(response, "Loop")
-        self.assertContains(response, "Interval (seconds)")
+        self.assertContains(response, "Trigger:")
+        self.assertNotContains(response, "Trigger period")
+        self.assertContains(response, "HH : MM : SS : hundredth")
         self.assertContains(response, "Number of measurements")
         self.assertNotContains(response, "Task settings")
         self.assertContains(response, "Back")
@@ -177,6 +181,22 @@ class TaskViewTests(TestCase):
         self.assertContains(response, "task-row-state")
         self.assertContains(response, "Completed")
 
+    def test_saved_task_list_displays_database_id(self):
+        """The saved task table includes each task's database ID."""
+        task = AutomationTask.objects.create(
+            user=self.user,
+            name="Numbered task",
+            interval_seconds=1,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("task_list"))
+
+        self.assertContains(response, '<th scope="col">ID</th>', html=True)
+        self.assertContains(response, f"<td>{task.pk}</td>", html=True)
+        self.assertContains(response, "task-row table-active")
+        self.assertContains(response, 'aria-selected="true"')
+
     @patch("tasks.views.TaskRunner.start")
     def test_create_endpoint_saves_and_schedules_valid_task(self, start):
         """A valid form creates an owned persistent background task."""
@@ -188,8 +208,11 @@ class TaskViewTests(TestCase):
                 "name": "Bench sweep",
                 "description": "Check the virtual bench voltage sweep.",
                 "measurement_mode": "loop",
-                "interval_seconds": "0.1",
-                "requested_samples": "3",
+                "trigger_hours": "0",
+                "trigger_minutes": "0",
+                "trigger_seconds": "5",
+                "trigger_hundredths": "25",
+                "requested_samples": "1000",
                 "instruments": json.dumps(
                     [
                         {
@@ -200,6 +223,7 @@ class TaskViewTests(TestCase):
                                 "stop_voltage": "2.000",
                                 "voltage_step": "1.000",
                                 "cycle_count": "1",
+                                "readback_voltage": True,
                             },
                         },
                         {
@@ -223,14 +247,24 @@ class TaskViewTests(TestCase):
             "Check the virtual bench voltage sweep.",
         )
         self.assertEqual(task.measurement_mode, "loop")
-        self.assertEqual(task.interval_seconds, 0.1)
-        self.assertEqual(task.requested_samples, 3)
+        self.assertEqual(task.interval_seconds, 5.25)
+        self.assertEqual(task.start_delay_seconds, 1)
+        self.assertEqual(task.requested_samples, 1000)
         self.assertEqual(task.task_instruments.count(), 2)
+        self.assertTrue(
+            task.task_instruments.get(
+                instrument=self.power_supply,
+            ).configuration["readback_voltage"],
+        )
         payload = response.json()
         self.assertEqual(payload["id"], task.pk)
         self.assertEqual(payload["name"], "Bench sweep")
         self.assertEqual(payload["status"], AutomationTask.Status.PENDING)
         self.assertEqual(payload["sample_count"], 0)
+        self.assertEqual(
+            payload["trigger_period"],
+            {"hours": 0, "minutes": 0, "seconds": 5, "hundredths": 25},
+        )
         start.assert_called_once_with(task.pk)
 
     def test_task_detail_does_not_expose_another_users_task(self):
@@ -254,6 +288,25 @@ class TaskViewTests(TestCase):
         response = self.client.get(reverse("task_detail", args=[task.pk]))
 
         self.assertEqual(response.status_code, 404)
+
+    def test_owner_can_stop_task_after_server_restart(self):
+        """A task without an in-process worker can still be stopped."""
+        task = AutomationTask.objects.create(
+            user=self.user,
+            name="Interrupted by restart",
+            status=AutomationTask.Status.RUNNING,
+            started_at=timezone.now(),
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("task_stop", args=[task.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"stopping": True})
+        task.refresh_from_db()
+        self.assertEqual(task.status, AutomationTask.Status.STOPPED)
+        self.assertTrue(task.stop_requested)
+        self.assertIsNotNone(task.finished_at)
 
     def test_owner_can_delete_completed_task(self):
         """Deleting a task also removes its assignments and readings."""
@@ -316,6 +369,11 @@ class TaskViewTests(TestCase):
             name="Stopped task",
             status=AutomationTask.Status.STOPPED,
         )
+        sample = TaskSample.objects.create(
+            task=task,
+            index=1,
+            voltage_setpoint=1,
+        )
         self.client.force_login(self.user)
 
         response = self.client.post(reverse("task_complete", args=[task.pk]))
@@ -324,6 +382,7 @@ class TaskViewTests(TestCase):
         task.refresh_from_db()
         self.assertEqual(task.status, AutomationTask.Status.COMPLETED)
         self.assertEqual(response.json()["status"], "completed")
+        self.assertEqual(response.json()["samples"][0]["index"], sample.index)
 
     def test_running_task_cannot_be_marked_as_completed(self):
         """An active task must be stopped before it can be finalized."""
@@ -392,6 +451,7 @@ class TaskViewTests(TestCase):
                 "stop_voltage": "5.000",
                 "voltage_step": "1.000",
                 "cycle_count": 1,
+                "readback_voltage": True,
             },
         )
         sample = TaskSample.objects.create(
@@ -406,6 +466,13 @@ class TaskViewTests(TestCase):
             value=5,
             unit="V",
         )
+        TaskReading.objects.create(
+            sample=sample,
+            task_instrument=assignment,
+            parameter="Output voltage readback",
+            value="4.98",
+            unit="V",
+        )
         self.client.force_login(self.user)
 
         response = self.client.get(reverse("task_export_csv", args=[task.pk]))
@@ -413,8 +480,12 @@ class TaskViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
-        self.assertIn("Time,Task PSU", content)
-        self.assertIn(",5.000000 V", content)
+        self.assertIn(
+            "Time,Task PSU — Set voltage,Task PSU — Read voltage",
+            content,
+        )
+        self.assertIn(",5.000 V", content)
+        self.assertIn(",4.980 V", content)
 
     def test_user_cannot_export_another_users_task(self):
         """Direct CSV URLs do not expose another owner's task."""
@@ -452,7 +523,7 @@ class AutomationRunnerTests(TestCase):
             manufacturer="OIL",
             model_name="Mock DMM",
             driver=Instrument.Driver.MOCK,
-            address="mock://default",
+            address="mock-dmm://default",
         )
 
     def create_task(self, **overrides):
@@ -470,6 +541,7 @@ class AutomationRunnerTests(TestCase):
             "measurement_mode": AutomationTask.MeasurementMode.LOOP,
             "requested_samples": 3,
             "interval_seconds": 0.1,
+            "start_delay_seconds": 0,
             "temperature_min": Decimal("20.00"),
             "temperature_max": Decimal("21.00"),
             "temperature_resolution": Decimal("0.10"),
@@ -499,6 +571,27 @@ class AutomationRunnerTests(TestCase):
                 Decimal("1.000"),
                 Decimal("2.000"),
                 Decimal("1.000"),
+                Decimal("0.000"),
+            ),
+        )
+
+    def test_continuous_sweep_finishes_at_program_endpoint(self):
+        """Continuous acquisition runs one finite PSU sweep and then finishes."""
+        task = self.create_task(
+            voltage_mode=AutomationTask.VoltageMode.SWEEP,
+            cycle_count=1,
+            measurement_mode=AutomationTask.MeasurementMode.CONTINUOUS,
+        )
+        base_sequence = voltage_sequence(task)
+
+        values = tuple(measurement_sequence(task, base_sequence))
+
+        self.assertEqual(
+            values,
+            (
+                Decimal("0.000"),
+                Decimal("1.000"),
+                Decimal("2.000"),
             ),
         )
 
@@ -576,6 +669,7 @@ class AutomationRunnerTests(TestCase):
                 "stop_voltage": "2.000",
                 "voltage_step": "1.000",
                 "cycle_count": 1,
+                "readback_voltage": True,
             },
         )
         TaskInstrument.objects.create(
@@ -595,7 +689,14 @@ class AutomationRunnerTests(TestCase):
         self.assertEqual(task.samples.count(), 3)
         self.assertEqual(TaskReading.objects.filter(
             sample__task=task,
-        ).count(), 6)
+        ).count(), 9)
+        self.assertEqual(
+            TaskReading.objects.filter(
+                sample__task=task,
+                parameter="Output voltage readback",
+            ).count(),
+            3,
+        )
         voltage_readings = TaskReading.objects.filter(
             sample__task=task,
             parameter="Voltage DC",

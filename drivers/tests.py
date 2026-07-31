@@ -18,7 +18,9 @@ from .keysight_34461a import Keysight34461ADriver
 from .mock import MockInstrumentDriver
 from .mock_dc_power_supply import MockDCPowerSupplyDriver
 from .registry import DriverRegistry
+from .rnd_ka3005p import RNDKA3005PDriver
 from .transports import InstrumentTransport
+from .transports import MockTransport
 
 
 class Agilent34401ADriverTests(SimpleTestCase):
@@ -88,6 +90,19 @@ class Agilent34401ADriverTests(SimpleTestCase):
             ],
         )
         connection.close.assert_called_once()
+
+    def test_display_control_uses_34401a_display_command(self):
+        """Task display control emits the documented OFF and ON commands."""
+        driver = Agilent34401ADriver(port="/dev/ttyUSB0")
+
+        with patch.object(driver, "write") as write:
+            driver.set_display_enabled(False)
+            driver.set_display_enabled(True)
+
+        self.assertEqual(
+            [call.args[0] for call in write.call_args_list],
+            ["DISP OFF", "DISP ON"],
+        )
 
     @patch("serial.tools.list_ports.comports")
     def test_port_can_be_discovered_by_usb_serial_number(self, comports):
@@ -271,6 +286,19 @@ class Keysight34461ADriverTests(SimpleTestCase):
             [b"*IDN?\n", b"SYST:LOC\n"],
         )
         device.close.assert_called_once()
+
+    def test_display_control_uses_truevolt_display_state_command(self):
+        """Task display control emits the documented OFF and ON commands."""
+        driver = Keysight34461ADriver()
+
+        with patch.object(driver, "write") as write:
+            driver.set_display_enabled(False)
+            driver.set_display_enabled(True)
+
+        self.assertEqual(
+            [call.args[0] for call in write.call_args_list],
+            ["DISP OFF", "DISP ON"],
+        )
 
     def test_connect_wraps_device_open_error(self):
         """An inaccessible USBTMC node becomes a connection error."""
@@ -530,13 +558,13 @@ class DriverFactoryTests(SimpleTestCase):
         """Mock inventory configuration maps its address to a simulation."""
         driver = create_driver(
             SimpleNamespace(
-                driver="mock",
-                address="mock://default",
+                driver="mock-dmm",
+                address="mock-dmm://default",
             ),
         )
 
         self.assertIsInstance(driver, MockInstrumentDriver)
-        self.assertEqual(driver.address, "mock://default")
+        self.assertEqual(driver.address, "mock-dmm://default")
 
     def test_factory_creates_mock_dc_power_supply(self):
         """Power-supply inventory maps to its dedicated mock driver."""
@@ -549,6 +577,18 @@ class DriverFactoryTests(SimpleTestCase):
 
         self.assertIsInstance(driver, MockDCPowerSupplyDriver)
         self.assertEqual(driver.address, "mock-psu://default")
+
+    def test_factory_creates_rnd_ka3005p_power_supply(self):
+        """RND inventory configuration maps its address to a serial port."""
+        driver = create_driver(
+            SimpleNamespace(
+                driver="rnd_ka3005p",
+                address="/dev/ttyACM0",
+            ),
+        )
+
+        self.assertIsInstance(driver, RNDKA3005PDriver)
+        self.assertEqual(driver.port, "/dev/ttyACM0")
 
 
 class DriverRegistryTests(SimpleTestCase):
@@ -565,8 +605,9 @@ class DriverRegistryTests(SimpleTestCase):
             (
                 "agilent_34401a",
                 "keysight_34461a",
-                "mock",
+                "mock-dmm",
                 "mock_dc_power_supply",
+                "rnd_ka3005p",
             ),
         )
 
@@ -597,7 +638,7 @@ class DriverRegistryTests(SimpleTestCase):
 
     def test_capabilities_are_available_without_creating_a_driver(self):
         """Registry metadata can build forms without touching hardware."""
-        capabilities = DriverRegistry.capabilities("mock")
+        capabilities = DriverRegistry.capabilities("mock-dmm")
 
         self.assertEqual(
             tuple(capabilities),
@@ -633,6 +674,100 @@ class MockInstrumentDriverTests(SimpleTestCase):
         self.assertEqual(identity, MockInstrumentDriver.IDENTITY)
         self.assertFalse(driver.connected)
         self.assertEqual(driver.command_history, ("*IDN?",))
+
+
+class RNDKA3005PDriverTests(SimpleTestCase):
+    """Verify RND supply protocol and safety validation without hardware."""
+
+    def create_driver(self, responses=None):
+        """Return a driver using an in-memory serial-like transport."""
+        transport = MockTransport(responses or {})
+        return RNDKA3005PDriver("/dev/ttyACM0", transport=transport)
+
+    def test_identification_uses_documented_command(self):
+        """The driver identifies the supply and closes the connection."""
+        driver = self.create_driver({"*IDN?": "RND 320-KA3005P V1.3"})
+
+        with driver:
+            identity = driver.identify()
+
+        self.assertEqual(identity, "RND 320-KA3005P V1.3")
+        self.assertFalse(driver.connected)
+        self.assertEqual(driver.transport.command_history, ["*IDN?"])
+
+    def test_voltage_output_and_measurement_commands(self):
+        """Voltage programming and output control use channel-one syntax."""
+        driver = self.create_driver({"VOUT1?": "12.34"})
+
+        with driver:
+            self.assertEqual(driver.set_voltage("12.34"), 12.34)
+            driver.enable_output()
+            measured = driver.measure_output_voltage()
+            driver.disable_output()
+
+        self.assertEqual(measured, 12.34)
+        self.assertEqual(
+            driver.transport.command_history,
+            ["VSET1:12.34", "OUT1", "VOUT1?", "OUT0"],
+        )
+
+    @patch("drivers.rnd_ka3005p.time.sleep")
+    def test_consecutive_commands_leave_controller_processing_time(self, sleep):
+        """Back-to-back writes and queries respect the device command interval."""
+        driver = self.create_driver({"VOUT1?": "1.00"})
+
+        with driver:
+            driver.set_voltage("1.00")
+            driver.measure_output_voltage()
+
+        self.assertTrue(sleep.called)
+        self.assertGreater(sleep.call_args.args[0], 0)
+        self.assertLessEqual(
+            sleep.call_args.args[0],
+            driver.COMMAND_INTERVAL_SECONDS,
+        )
+
+    def test_current_limit_uses_milliamp_resolution(self):
+        """Current programming supports the documented 1 mA steps."""
+        driver = self.create_driver()
+
+        with driver:
+            self.assertEqual(driver.set_current("1.234"), 1.234)
+
+        self.assertEqual(driver.transport.command_history, ["ISET1:1.234"])
+
+    def test_rejects_unsafe_voltage_and_current_values(self):
+        """Values outside device limits or resolution are rejected."""
+        driver = self.create_driver()
+
+        with driver:
+            for value in ("30.01", "-0.01", "1.001"):
+                with self.subTest(voltage=value):
+                    with self.assertRaises(ConfigurationError):
+                        driver.set_voltage(value)
+            for value in ("5.001", "-0.001", "1.0005"):
+                with self.subTest(current=value):
+                    with self.assertRaises(ConfigurationError):
+                        driver.set_current(value)
+
+    @patch("drivers.rnd_ka3005p.SerialTransport")
+    def test_connect_uses_documented_9600_8n1_raw_serial(self, transport_class):
+        """Production transport uses 9600 baud, one stop bit, no terminator."""
+        transport = MagicMock(is_open=True)
+        transport_class.return_value = transport
+        driver = RNDKA3005PDriver("/dev/ttyUSB0")
+
+        driver.connect()
+
+        transport_class.assert_called_once_with(
+            "/dev/ttyUSB0",
+            baudrate=9600,
+            timeout=1,
+            stopbits=1,
+            write_termination="",
+            response_termination=None,
+        )
+        self.assertTrue(driver.connected)
 
 
 class MockDCPowerSupplyDriverTests(SimpleTestCase):
@@ -793,7 +928,7 @@ class MockInstrumentDriverAdditionalTests(SimpleTestCase):
 
     def test_timeout_profile_simulates_measurement_failure(self):
         """The timeout profile raises a domain measurement error."""
-        driver = MockInstrumentDriver("mock://timeout")
+        driver = MockInstrumentDriver("mock-dmm://timeout")
 
         with driver:
             with self.assertRaisesMessage(
@@ -804,7 +939,7 @@ class MockInstrumentDriverAdditionalTests(SimpleTestCase):
 
     def test_connection_error_profile_simulates_unavailable_hardware(self):
         """The connection-error profile fails before becoming connected."""
-        driver = MockInstrumentDriver("mock://connection-error")
+        driver = MockInstrumentDriver("mock-dmm://connection-error")
 
         with self.assertRaisesMessage(
             ConnectionError,

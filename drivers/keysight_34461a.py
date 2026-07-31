@@ -115,6 +115,10 @@ class Keysight34461ADriver(BaseInstrumentDriver):
         """Return the instrument identity response."""
         return self.query("*IDN?")
 
+    def set_display_enabled(self, enabled: bool) -> None:
+        """Enable or disable front-panel display updates."""
+        self.write(f"DISP {'ON' if enabled else 'OFF'}")
+
     def measure_dc_voltage(self) -> MeasurementResult:
         """Measure DC voltage in autorange and return a normalized result."""
         return self._measure_function(
@@ -123,6 +127,25 @@ class Keysight34461ADriver(BaseInstrumentDriver):
             autorange_command="VOLT:DC:RANG:AUTO ON",
             parameter="Voltage DC",
             unit="V",
+        )
+
+    def prepare_measurement(self, function: str) -> None:
+        """Configure a task measurement function before its first trigger."""
+        settings = {
+            "dc_voltage": ("CONF:VOLT:DC", "VOLT:DC:RANG:AUTO ON"),
+            "ac_voltage": ("CONF:VOLT:AC", "VOLT:AC:RANG:AUTO ON"),
+            "resistance": ("CONF:RES", "RES:RANG:AUTO ON"),
+        }
+        try:
+            configure_command, autorange_command = settings[function]
+        except KeyError as exc:
+            raise MeasurementError(
+                f"The Keysight 34461A does not support {function!r}.",
+            ) from exc
+        self._prepare_function(
+            function,
+            configure_command,
+            autorange_command,
         )
 
     def measure_ac_voltage(self) -> MeasurementResult:
@@ -156,16 +179,11 @@ class Keysight34461ADriver(BaseInstrumentDriver):
     ) -> MeasurementResult:
         """Configure one function when needed and return its next reading."""
         try:
-            if self._prepared_function != function:
-                self.write("*CLS")
-                time.sleep(0.5)
-                self.write(configure_command)
-                time.sleep(0.1)
-                self.write(autorange_command)
-                time.sleep(0.1)
-                self._prepared_function = function
-                self._dc_voltage_prepared = function == "dc_voltage"
-
+            self._prepare_function(
+                function,
+                configure_command,
+                autorange_command,
+            )
             self.write("READ?")
             time.sleep(0.5)
             value = float(self.read_response())
@@ -175,3 +193,21 @@ class Keysight34461ADriver(BaseInstrumentDriver):
             ) from exc
 
         return MeasurementResult(parameter=parameter, value=value, unit=unit)
+
+    def _prepare_function(
+        self,
+        function: str,
+        configure_command: str,
+        autorange_command: str,
+    ) -> None:
+        """Configure one measurement function once per connection."""
+        if self._prepared_function == function:
+            return
+        self.write("*CLS")
+        time.sleep(0.5)
+        self.write(configure_command)
+        time.sleep(0.1)
+        self.write(autorange_command)
+        time.sleep(0.1)
+        self._prepared_function = function
+        self._dc_voltage_prepared = function == "dc_voltage"

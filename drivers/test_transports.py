@@ -74,6 +74,24 @@ class SerialTransportTests(SimpleTestCase):
         ):
             transport.read(timeout=0)
 
+    def test_raw_response_does_not_wait_for_a_newline(self):
+        """Unterminated device responses finish after a short quiet period."""
+        connection = MagicMock(is_open=True)
+        type(connection).in_waiting = property(
+            lambda _connection: 5 if not connection.read.called else 0,
+        )
+        connection.read.return_value = b"12.34"
+        transport = SerialTransport(
+            "/dev/ttyUSB9",
+            response_termination=None,
+        )
+        transport.connection = connection
+
+        response = transport.read(timeout=1)
+
+        connection.read.assert_called_once_with(5)
+        self.assertEqual(response, "12.34")
+
 
 class USBTMCTransportTests(SimpleTestCase):
     """Verify Linux USBTMC open, transfer, and cleanup behavior."""

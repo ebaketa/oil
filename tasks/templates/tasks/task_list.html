@@ -24,13 +24,13 @@ Tasks
         <button class="btn btn-outline-primary"
                 id="task-open-button"
                 type="button"
-                disabled>
+                {% if not saved_tasks %}disabled{% endif %}>
             Open
         </button>
         <button class="btn btn-outline-danger"
                 id="task-delete-button"
                 type="button"
-                disabled>
+                {% if not saved_tasks %}disabled{% endif %}>
             Delete
         </button>
     </div>
@@ -80,9 +80,11 @@ Tasks
 
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0"
-                   id="saved-task-table">
+                   id="saved-task-table"
+                   data-is-admin="{{ user.is_staff|yesno:'true,false' }}">
                 <thead>
                     <tr>
+                        <th scope="col">ID</th>
                         <th scope="col">Task name</th>
                         <th scope="col">Start date and time</th>
                         <th scope="col">State</th>
@@ -90,7 +92,7 @@ Tasks
                 </thead>
                 <tbody>
                     {% for task in saved_tasks %}
-                        <tr class="task-row"
+                        <tr class="task-row{% if forloop.first %} table-active{% endif %}"
                             tabindex="0"
                             data-task-id="{{ task.pk }}"
                             data-task-title="{{ task.name }}"
@@ -101,7 +103,8 @@ Tasks
                             data-status-label="{{ task.get_status_display }}"
                             data-started="{{ task.started_at|date:'d.m.Y H:i:s' }}"
                             data-measurement-count="{{ task.sample_count }}"
-                            aria-selected="false">
+                            aria-selected="{% if forloop.first %}true{% else %}false{% endif %}">
+                            <td>{{ task.pk }}</td>
                             <th scope="row">{{ task.name }}</th>
                             <td class="task-row-started">
                                 {{ task.started_at|date:"d.m.Y H:i:s"|default:"—" }}
@@ -120,7 +123,7 @@ Tasks
                         </tr>
                     {% empty %}
                         <tr id="saved-task-empty-row">
-                            <td class="text-center text-muted py-4" colspan="3">
+                            <td class="text-center text-muted py-4" colspan="4">
                                 No saved tasks are available.
                             </td>
                         </tr>
@@ -167,6 +170,31 @@ Tasks
                 </div>
             </div>
 
+            <div class="d-flex flex-nowrap align-items-end gap-2 mb-4
+                        overflow-x-auto task-trigger-fields">
+                    <strong class="form-label mb-2 me-1">Trigger:</strong>
+                    <div>
+                        {{ task_form.trigger_hours }}
+                        <div class="invalid-feedback"></div>
+                    </div>
+                    <div>
+                        {{ task_form.trigger_minutes }}
+                        <div class="invalid-feedback"></div>
+                    </div>
+                    <div>
+                        {{ task_form.trigger_seconds }}
+                        <div class="invalid-feedback"></div>
+                    </div>
+                    <div>
+                        {{ task_form.trigger_hundredths }}
+                        <div class="invalid-feedback"></div>
+                    </div>
+                    <div class="form-text text-nowrap mb-2 ms-1">
+                        HH : MM : SS : hundredth
+                    </div>
+            </div>
+            {{ task_form.interval_seconds }}
+
             <div class="row g-3 align-items-end mb-4">
                 <div class="col-md-4">
                     <label class="form-label">
@@ -175,11 +203,11 @@ Tasks
                     {{ task_form.measurement_mode }}
                     <div class="invalid-feedback"></div>
                 </div>
-                <div class="col-md-4 task-interval-field d-none">
+                <div class="col-md-4">
                     <label class="form-label">
-                        {{ task_form.interval_seconds.label }}
+                        {{ task_form.start_delay_seconds.label }}
                     </label>
-                    {{ task_form.interval_seconds }}
+                    {{ task_form.start_delay_seconds }}
                     <div class="invalid-feedback"></div>
                 </div>
                 <div class="col-md-4 task-count-field d-none">
@@ -264,6 +292,10 @@ Tasks
                     <strong>Measurements:</strong>
                     <span class="saved-task-count"></span>
                 </div>
+                <div>
+                    <strong>Elapsed:</strong>
+                    <span class="saved-task-elapsed"></span>
+                </div>
                 <a class="btn btn-sm btn-outline-secondary ms-auto d-none
                           task-export-button"
                    href="#">
@@ -276,6 +308,7 @@ Tasks
             <table class="table table-sm">
                 <thead>
                     <tr class="task-results-header">
+                        <th>ID</th>
                         <th>Time</th>
                     </tr>
                 </thead>
@@ -288,5 +321,5 @@ Tasks
 {% endblock %}
 
 {% block scripts %}
-<script src="{% static 'tasks/js/task_tabs.js' %}?v=6"></script>
+<script src="{% static 'tasks/js/task_tabs.js' %}?v=18"></script>
 {% endblock %}

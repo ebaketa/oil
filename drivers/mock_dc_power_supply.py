@@ -10,6 +10,7 @@ from .transports import InstrumentTransport, MockTransport
 class MockDCPowerSupplyDriver(BaseInstrumentDriver):
     """Simulate a programmable single-output DC power supply."""
 
+    DEVICE_TYPE = "power_supply"
     IDENTITY = "OIL,MOCK-DC-POWER-SUPPLY,0001,1.0"
     MIN_VOLTAGE = Decimal("0.000")
     MAX_VOLTAGE = Decimal("60.000")

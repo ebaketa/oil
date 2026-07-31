@@ -88,7 +88,6 @@ class AuthenticationTests(TestCase):
             "about",
             "profile",
             "instrument_list",
-            "instrument_create",
             "measurement_list",
             "measurement_create",
             "measurement_loop",
@@ -99,6 +98,8 @@ class AuthenticationTests(TestCase):
 
     def test_pages_use_consistent_browser_titles(self):
         """Every page title ends with the OIL application name."""
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
         self.client.force_login(self.user)
         expected_titles = {
             "dashboard": "Dashboard | OIL",
@@ -357,6 +358,11 @@ class InstrumentInventoryTests(TestCase):
         """Authenticate the inventory user."""
         self.client.force_login(self.user)
 
+    def grant_admin_access(self):
+        """Grant the inventory user instrument-management access."""
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+
     def create_instrument(self, **overrides):
         """Create a Keysight test instrument with optional field overrides."""
         values = {
@@ -371,30 +377,238 @@ class InstrumentInventoryTests(TestCase):
         values.update(overrides)
         return Instrument.objects.create(**values)
 
-    def test_empty_instrument_list_invites_user_to_add_instrument(self):
-        """An empty inventory has a clear initial state and add action."""
+    def test_empty_instrument_list_has_a_clear_initial_state(self):
+        """An empty inventory has a clear initial state."""
         response = self.client.get(reverse("instrument_list"))
 
         self.assertContains(response, "No instruments have been added yet.")
-        self.assertContains(response, reverse("instrument_create"))
+        self.assertNotContains(response, reverse("instrument_create"))
         self.assertContains(response, reverse("dashboard"))
         self.assertEqual(response.context["instrument_count"], 0)
 
-    def test_user_can_add_instrument(self):
-        """A valid instrument is stored offline and shown on Dashboard."""
-        response = self.client.post(
-            reverse("instrument_create"),
-            {
-                "name": "Bench multimeter",
-                "manufacturer": "Keysight",
-                "model_name": "34461A",
-                "serial_number": "MY12345678",
-                "driver": Instrument.Driver.KEYSIGHT_34461A,
-                "address": "/dev/usbtmc0",
-                "description": "Primary bench DMM",
-            },
+    def test_instrument_list_displays_database_id(self):
+        """The inventory table includes each instrument's database ID."""
+        instrument = self.create_instrument()
+
+        response = self.client.get(reverse("instrument_list"))
+
+        self.assertContains(response, '<th scope="col">ID</th>', html=True)
+        self.assertContains(response, f"<td>{instrument.pk}</td>", html=True)
+        self.assertContains(response, "table-active")
+        self.assertContains(response, 'aria-selected="true"')
+
+    def test_instrument_list_is_ordered_by_database_id(self):
+        """The inventory table orders instruments by ascending database ID."""
+        first = self.create_instrument(name="First instrument")
+        second = self.create_instrument(
+            name="Second instrument",
+            address="/dev/usbtmc1",
         )
 
+        response = self.client.get(reverse("instrument_list"))
+
+        self.assertEqual(
+            [instrument.pk for instrument in response.context["instruments"]],
+            [first.pk, second.pk],
+        )
+
+    def test_instrument_rows_can_be_selected_for_editing(self):
+        """The inventory supplies selectable rows and an Edit button."""
+        instrument = self.create_instrument()
+        self.grant_admin_access()
+
+        response = self.client.get(reverse("instrument_list"))
+
+        self.assertContains(response, "oil-instrument-row")
+        self.assertNotContains(response, "oil-instrument-selector")
+        self.assertContains(response, 'id="instrument-edit-button"')
+        self.assertNotContains(
+            response,
+            'id="instrument-edit-button" disabled',
+        )
+        self.assertNotContains(
+            response,
+            'id="instrument-delete-button" disabled',
+        )
+        self.assertContains(
+            response,
+            reverse("instrument_edit", args=[instrument.pk]),
+        )
+
+    def test_management_controls_are_visible_only_to_admin(self):
+        """Only staff users see instrument management controls."""
+        instrument = self.create_instrument()
+
+        response = self.client.get(reverse("instrument_list"))
+        self.assertNotContains(response, reverse("instrument_create"))
+        self.assertNotContains(response, 'id="instrument-edit-button"')
+        self.assertNotContains(response, 'id="instrument-delete-button"')
+        self.assertNotContains(
+            response,
+            reverse("instrument_edit", args=[instrument.pk]),
+        )
+        self.assertNotContains(
+            response,
+            f'href="{reverse("instrument_detail", args=[instrument.pk])}"',
+        )
+        self.assertNotContains(
+            response,
+            f'href="{reverse("instrument_driver", args=[instrument.pk])}"',
+        )
+        self.assertContains(response, instrument.name)
+        self.assertContains(response, instrument.get_driver_display())
+        self.assertNotContains(response, "oil-instrument-row")
+
+        self.grant_admin_access()
+        admin_response = self.client.get(reverse("instrument_list"))
+        self.assertContains(admin_response, reverse("instrument_create"))
+        self.assertContains(admin_response, 'id="instrument-edit-button"')
+        self.assertContains(admin_response, 'id="instrument-delete-button"')
+        self.assertContains(admin_response, "instrument-list.js")
+
+    def test_regular_user_can_view_instrument_information(self):
+        """An instrument name opens read-only information for a regular user."""
+        instrument = self.create_instrument()
+
+        response = self.client.get(
+            reverse("instrument_detail", args=[instrument.pk]),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, instrument.name)
+        self.assertContains(response, instrument.manufacturer)
+        self.assertContains(response, instrument.model_name)
+        self.assertContains(response, instrument.serial_number)
+        self.assertContains(response, instrument.address)
+        self.assertContains(response, "Driver information")
+        self.assertContains(response, instrument.get_driver_display())
+        self.assertContains(response, "Supported measurement functions")
+        self.assertContains(response, "DC voltage")
+        self.assertNotContains(response, "Save changes")
+
+    def test_regular_user_row_opens_instrument_detail_on_double_click(self):
+        """A regular user's row exposes its read-only detail destination."""
+        instrument = self.create_instrument()
+
+        response = self.client.get(reverse("instrument_list"))
+
+        self.assertContains(response, "oil-instrument-detail-row")
+        self.assertContains(
+            response,
+            f'data-detail-url="{reverse("instrument_detail", args=[instrument.pk])}"',
+        )
+        self.assertContains(response, "instrument-list.js")
+
+    def test_admin_row_opens_detail_and_detail_has_edit_actions(self):
+        """An admin can open details and continue to instrument or driver editing."""
+        instrument = self.create_instrument()
+        self.grant_admin_access()
+
+        list_response = self.client.get(reverse("instrument_list"))
+
+        self.assertContains(
+            list_response,
+            f'data-detail-url="{reverse("instrument_detail", args=[instrument.pk])}"',
+        )
+
+        detail_response = self.client.get(
+            reverse("instrument_detail", args=[instrument.pk]),
+        )
+
+        self.assertContains(detail_response, "Edit instrument")
+        self.assertContains(
+            detail_response,
+            reverse("instrument_edit", args=[instrument.pk]),
+        )
+        self.assertContains(detail_response, "Driver settings")
+        self.assertContains(
+            detail_response,
+            reverse("instrument_driver", args=[instrument.pk]),
+        )
+
+    def test_non_admin_cannot_add_instrument(self):
+        """The create endpoint rejects a non-admin user."""
+        response = self.client.get(reverse("instrument_create"))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_non_admin_cannot_edit_instrument(self):
+        """The edit endpoint rejects a non-admin user."""
+        instrument = self.create_instrument()
+
+        response = self.client.get(
+            reverse("instrument_edit", args=[instrument.pk]),
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_non_admin_cannot_delete_instrument(self):
+        """The delete endpoint rejects a non-admin user."""
+        instrument = self.create_instrument()
+
+        response = self.client.post(
+            reverse("instrument_delete", args=[instrument.pk]),
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Instrument.objects.filter(pk=instrument.pk).exists())
+
+    def test_admin_can_delete_instrument(self):
+        """A staff user can delete an instrument with a POST request."""
+        instrument = self.create_instrument()
+        self.grant_admin_access()
+
+        response = self.client.post(
+            reverse("instrument_delete", args=[instrument.pk]),
+        )
+
+        self.assertRedirects(response, reverse("instrument_list"))
+        self.assertFalse(Instrument.objects.filter(pk=instrument.pk).exists())
+
+    def test_instrument_delete_requires_post(self):
+        """An administrator cannot delete an instrument with a GET request."""
+        instrument = self.create_instrument()
+        self.grant_admin_access()
+
+        response = self.client.get(
+            reverse("instrument_delete", args=[instrument.pk]),
+        )
+
+        self.assertEqual(response.status_code, 405)
+        self.assertTrue(Instrument.objects.filter(pk=instrument.pk).exists())
+
+    @patch(
+        "instruments.views.test_instrument_configuration",
+        return_value="KEYSIGHT,34461A,MY12345678,1.0",
+    )
+    def test_user_can_add_instrument(self, test_configuration):
+        """A tested instrument is stored offline and shown on Dashboard."""
+        self.grant_admin_access()
+        payload = {
+            "name": "Bench multimeter",
+            "manufacturer": "Keysight",
+            "model_name": "34461A",
+            "serial_number": "MY12345678",
+            "driver": Instrument.Driver.KEYSIGHT_34461A,
+            "address": "/dev/usbtmc0",
+            "description": "Primary bench DMM",
+        }
+
+        test_response = self.client.post(
+            reverse("instrument_create"),
+            {**payload, "action": "test_connection"},
+        )
+
+        self.assertEqual(test_response.status_code, 200)
+        self.assertContains(test_response, "Connection test passed")
+        self.assertContains(test_response, "KEYSIGHT,34461A")
+        self.assertFalse(Instrument.objects.exists())
+        test_configuration.assert_called_once()
+
+        response = self.client.post(
+            reverse("instrument_create"),
+            {**payload, "action": "save"},
+        )
         self.assertRedirects(response, reverse("instrument_list"))
         instrument = Instrument.objects.get()
         self.assertEqual(instrument.status, Instrument.Status.OFFLINE)
@@ -405,28 +619,79 @@ class InstrumentInventoryTests(TestCase):
         self.assertContains(instrument_list, "/dev/usbtmc0")
         self.assertEqual(instrument_list.context["instrument_count"], 1)
 
+    def test_instrument_form_places_labels_and_fields_in_rows(self):
+        """Each instrument label shares a row with its input control."""
+        self.grant_admin_access()
+        response = self.client.get(reverse("instrument_create"))
+
+        self.assertContains(
+            response,
+            'class="row mb-3 align-items-start"',
+            count=7,
+        )
+        self.assertContains(
+            response,
+            'class="col-4 col-form-label"',
+            count=7,
+        )
+        self.assertContains(response, 'class="col-8"', count=7)
+
     def test_user_can_add_mock_instrument(self):
         """The inventory form exposes the hardware-free mock driver."""
+        self.grant_admin_access()
+        payload = {
+            "name": "Simulated DMM",
+            "manufacturer": "OIL",
+            "model_name": "Mock DMM",
+            "serial_number": "",
+            "driver": Instrument.Driver.MOCK,
+            "address": "mock-dmm://default",
+            "description": "Development instrument",
+        }
+
+        test_response = self.client.post(
+            reverse("instrument_create"),
+            {**payload, "action": "test_connection"},
+        )
+
+        self.assertContains(test_response, "OIL,MOCK-DMM,0001,1.0")
+        response = self.client.post(
+            reverse("instrument_create"),
+            {**payload, "action": "save"},
+        )
+        self.assertRedirects(response, reverse("instrument_list"))
+        instrument = Instrument.objects.get()
+        self.assertEqual(instrument.driver, Instrument.Driver.MOCK)
+        self.assertEqual(instrument.address, "mock-dmm://default")
+
+    def test_untested_instrument_cannot_be_saved(self):
+        """Saving requires a successful test of the current configuration."""
+        self.grant_admin_access()
+
         response = self.client.post(
             reverse("instrument_create"),
             {
-                "name": "Simulated DMM",
+                "name": "Untested DMM",
                 "manufacturer": "OIL",
                 "model_name": "Mock DMM",
                 "serial_number": "",
                 "driver": Instrument.Driver.MOCK,
-                "address": "mock://default",
-                "description": "Development instrument",
+                "address": "mock-dmm://default",
+                "description": "",
+                "action": "save",
             },
         )
 
-        self.assertRedirects(response, reverse("instrument_list"))
-        instrument = Instrument.objects.get()
-        self.assertEqual(instrument.driver, Instrument.Driver.MOCK)
-        self.assertEqual(instrument.address, "mock://default")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            "Test the current driver and address before saving.",
+        )
+        self.assertFalse(Instrument.objects.exists())
 
     def test_invalid_instrument_is_not_created(self):
         """Required fields are validated before an instrument is stored."""
+        self.grant_admin_access()
         response = self.client.post(
             reverse("instrument_create"),
             {
@@ -511,27 +776,30 @@ class InstrumentInventoryTests(TestCase):
         self.assertEqual(response.context["online_instrument_count"], 1)
         self.assertEqual(response.context["reachable_instrument_count"], 1)
 
-    def test_instrument_name_links_to_edit_page(self):
-        """Selecting an instrument name opens its settings form."""
+    def test_instrument_name_is_not_a_link(self):
+        """The instrument name is displayed as plain text."""
+        instrument = self.create_instrument()
+        self.grant_admin_access()
+
+        response = self.client.get(reverse("instrument_list"))
+
+        self.assertNotContains(
+            response,
+            f'href="{reverse("instrument_edit", args=[instrument.pk])}"',
+        )
+        self.assertContains(response, instrument.name)
+
+    def test_driver_name_is_not_a_link(self):
+        """The driver name is displayed as plain text."""
         instrument = self.create_instrument()
 
         response = self.client.get(reverse("instrument_list"))
 
-        self.assertContains(
+        self.assertNotContains(
             response,
-            reverse("instrument_edit", args=[instrument.pk]),
+            f'href="{reverse("instrument_driver", args=[instrument.pk])}"',
         )
-
-    def test_driver_name_links_to_driver_page(self):
-        """Selecting a driver opens its details and test page."""
-        instrument = self.create_instrument()
-
-        response = self.client.get(reverse("instrument_list"))
-
-        self.assertContains(
-            response,
-            reverse("instrument_driver", args=[instrument.pk]),
-        )
+        self.assertContains(response, instrument.get_driver_display())
 
     @patch("instruments.views.ConnectionManager.connected_ids")
     def test_instrument_list_offers_connect_when_disconnected(
@@ -622,6 +890,7 @@ class InstrumentInventoryTests(TestCase):
     def test_edit_form_is_populated_with_instrument_settings(self):
         """The edit page displays the selected instrument's current values."""
         instrument = self.create_instrument()
+        self.grant_admin_access()
 
         response = self.client.get(
             reverse("instrument_edit", args=[instrument.pk]),
@@ -635,6 +904,7 @@ class InstrumentInventoryTests(TestCase):
     def test_user_can_edit_instrument_settings(self):
         """Valid edits are saved while driver-controlled status is preserved."""
         instrument = self.create_instrument(status=Instrument.Status.REACHABLE)
+        self.grant_admin_access()
 
         response = self.client.post(
             reverse("instrument_edit", args=[instrument.pk]),
@@ -658,6 +928,7 @@ class InstrumentInventoryTests(TestCase):
 
     def test_unknown_instrument_edit_returns_not_found(self):
         """Editing an instrument that does not exist returns HTTP 404."""
+        self.grant_admin_access()
         response = self.client.get(reverse("instrument_edit", args=[999999]))
 
         self.assertEqual(response.status_code, 404)
@@ -676,7 +947,7 @@ class InstrumentInventoryTests(TestCase):
         )
 
     def test_driver_page_displays_configuration(self):
-        """The driver page displays address, status, and test action."""
+        """A regular user sees driver information without test actions."""
         instrument = self.create_instrument()
 
         response = self.client.get(
@@ -685,7 +956,30 @@ class InstrumentInventoryTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, instrument.get_driver_display())
-        self.assertContains(response, instrument.address)
+        self.assertNotContains(response, f"<code>{instrument.address}</code>")
+        self.assertNotContains(
+            response,
+            reverse("instrument_driver_test", args=[instrument.pk]),
+        )
+        self.assertNotContains(
+            response,
+            reverse("instrument_driver_test_dcv", args=[instrument.pk]),
+        )
+        self.assertNotContains(response, "Edit instrument")
+        self.assertContains(response, "Supported measurement functions")
+        self.assertContains(response, "DC voltage")
+        self.assertContains(response, "Autorange")
+        self.assertContains(response, "<td>V</td>", html=True)
+
+    def test_admin_instrument_edit_displays_driver_test_actions(self):
+        """An administrator tests the driver from instrument settings."""
+        instrument = self.create_instrument()
+        self.grant_admin_access()
+
+        response = self.client.get(
+            reverse("instrument_edit", args=[instrument.pk]),
+        )
+
         self.assertContains(
             response,
             reverse("instrument_driver_test", args=[instrument.pk]),
@@ -694,22 +988,21 @@ class InstrumentInventoryTests(TestCase):
             response,
             reverse("instrument_driver_test_dcv", args=[instrument.pk]),
         )
-        self.assertContains(response, "Supported measurement functions")
-        self.assertContains(response, "DC voltage")
-        self.assertContains(response, "Autorange")
-        self.assertContains(response, "<td>V</td>", html=True)
+        self.assertContains(response, "Connection test")
+        self.assertContains(response, "DC Voltage Auto mode")
 
     @patch("instruments.views.test_instrument_driver", return_value="KEYSIGHT,34461A")
     def test_driver_test_uses_service_and_redirects(self, test_driver):
         """A POST runs the driver service and returns to its details page."""
         instrument = self.create_instrument()
+        self.grant_admin_access()
         test_url = reverse("instrument_driver_test", args=[instrument.pk])
 
         response = self.client.post(test_url)
 
         self.assertRedirects(
             response,
-            reverse("instrument_driver", args=[instrument.pk]),
+            reverse("instrument_edit", args=[instrument.pk]),
         )
         test_driver.assert_called_once()
         self.assertEqual(test_driver.call_args.args[0], instrument)
@@ -724,6 +1017,20 @@ class InstrumentInventoryTests(TestCase):
 
         self.assertEqual(response.status_code, 405)
 
+    def test_regular_user_cannot_run_driver_tests(self):
+        """Driver test endpoints reject a regular user's POST requests."""
+        instrument = self.create_instrument()
+
+        for route_name in (
+            "instrument_driver_test",
+            "instrument_driver_test_dcv",
+        ):
+            with self.subTest(route_name=route_name):
+                response = self.client.post(
+                    reverse(route_name, args=[instrument.pk]),
+                )
+                self.assertEqual(response.status_code, 403)
+
     @patch(
         "instruments.views.test_instrument_dc_voltage_mode",
         return_value=FunctionConfiguration(
@@ -732,15 +1039,16 @@ class InstrumentInventoryTests(TestCase):
         ),
     )
     def test_dcv_mode_test_uses_service_and_redirects(self, test_dcv):
-        """A POST runs DCV verification and returns to driver details."""
+        """A POST runs DCV verification and returns to instrument settings."""
         instrument = self.create_instrument()
+        self.grant_admin_access()
         test_url = reverse("instrument_driver_test_dcv", args=[instrument.pk])
 
         response = self.client.post(test_url)
 
         self.assertRedirects(
             response,
-            reverse("instrument_driver", args=[instrument.pk]),
+            reverse("instrument_edit", args=[instrument.pk]),
         )
         test_dcv.assert_called_once()
         self.assertEqual(test_dcv.call_args.args[0], instrument)
@@ -1428,6 +1736,9 @@ class MeasurementListTests(TestCase):
         self.assertContains(response, "1.2345")
         self.assertContains(response, "<td>V</td>", html=True)
         self.assertEqual(response.context["measurement_count"], 1)
+        self.assertContains(response, "measurement-row table-active")
+        self.assertContains(response, 'aria-selected="true"')
+        self.assertContains(response, "measurement-list.js")
 
     def test_dashboard_measurement_card_links_and_counts(self):
         """Dashboard measurement card links to the list and shows its count."""
@@ -1530,7 +1841,7 @@ class MeasurementServiceTests(TestCase):
             manufacturer="OIL",
             model_name="Mock DMM",
             driver=Instrument.Driver.MOCK,
-            address="mock://default",
+            address="mock-dmm://default",
         )
 
         measurement = perform_measurement(
@@ -1552,7 +1863,7 @@ class MeasurementServiceTests(TestCase):
             manufacturer="OIL",
             model_name="Mock DMM",
             driver=Instrument.Driver.MOCK,
-            address="mock://default",
+            address="mock-dmm://default",
         )
 
         dc_current = perform_measurement(mock_instrument, "dc_current")

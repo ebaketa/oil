@@ -3,6 +3,7 @@
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.utils import timezone
 
 from instruments.models import Instrument
 
@@ -92,7 +93,11 @@ class AutomationTask(models.Model):
     )
     interval_seconds = models.FloatField(
         default=1,
-        validators=(MinValueValidator(0.1),),
+        validators=(MinValueValidator(0.01),),
+    )
+    start_delay_seconds = models.FloatField(
+        default=1,
+        validators=(MinValueValidator(0),),
     )
     cycle_count = models.PositiveIntegerField(default=1)
     requested_samples = models.PositiveIntegerField(default=10)
@@ -153,7 +158,7 @@ class TaskSample(models.Model):
         null=True,
         blank=True,
     )
-    timestamp = models.DateTimeField(auto_now_add=True)
+    timestamp = models.DateTimeField(default=timezone.now)
 
     class Meta:
         ordering = ("index",)

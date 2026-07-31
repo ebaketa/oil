@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added an RND Lab 320-KA3005P DC power-supply driver for its documented
+  9600-baud serial protocol, including identification, voltage and current
+  programming, output control, readback, validation, and safe shutdown.
+- Added read-only instrument details for all authenticated users and
+  administrator-only inventory creation, editing, deletion, and driver tests.
+- Added a required connection test before a new instrument configuration can
+  be saved.
+- Added keyboard and double-click row navigation to instrument and measurement
+  lists.
+- Added a task-level trigger clock with hour, minute, second, and hundredth
+  controls. Continuous and Loop tasks now keep their requested trigger cadence
+  without adding instrument communication time to every interval.
+- Added an optional power-supply output-voltage readback after each task
+  trigger, using the physical or Mock driver's measurement query.
+- Added a live HH:MM:SS elapsed-time display to open task headers.
+- Added a configurable task start delay after instrument preparation and before
+  the first trigger.
+- Added an optional Agilent 34401A and Keysight 34461A front-panel display-off
+  setting for tasks, with automatic display restoration during cleanup.
 - Added optional short task descriptions and selectable Single, Continuous,
   and Loop execution modes with mode-specific interval and measurement-count
   settings.
@@ -19,12 +38,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Renamed the generic Mock instrument to Mock DMM, including its driver key and
+  address scheme, with data migrations for existing inventory records.
+- Instrument lists are now ordered by database ID and distinguish the
+  management controls available to administrators from read-only access.
+- Loop tasks now accept up to 10,000 requested measurements instead of 100.
 - Simplified the new-task header by removing the generic Task settings heading
   and moving Stop beside the live task status.
 - Completed tasks are now labelled consistently as Completed in the Task list.
 
 ### Fixed
 
+- Continuous tasks no longer restart a completed finite PSU Sweep program;
+  they finish as Completed at its final setpoint. Cycle count represents the
+  exact number of complete return-to-start cycles.
+- Marking a stopped task as Completed no longer clears its result table from
+  the open task tab.
+- RND KA3005P commands now observe the controller's processing interval so an
+  output-voltage readback immediately after programming does not time out.
+- Task runners now program the first PSU setpoint before enabling its output
+  and allow the RND output to settle before readback, preventing a previous
+  front-panel setpoint from appearing in the first sample.
+- Power-supply setpoints and readbacks now use each driver's published voltage
+  resolution in task tables and CSV exports instead of always showing six
+  decimal places.
+- PSU-only setpoint columns now retain driver voltage precision even when
+  output readback is disabled.
+- RND readbacks now consume their raw unterminated serial responses without
+  waiting for a newline timeout on every sample.
+- Task triggers now follow absolute monotonic deadlines and record the trigger
+  instant before instrument communication, preventing timing drift from being
+  accumulated across samples.
+- Keysight 34461A task functions are now prepared before the trigger clock
+  starts, removing one-time autorange configuration from the first sample.
 - Newly created tasks now appear in the Task list immediately without a page
   reload.
 - Task JavaScript assets now use cache-busting versions so interface changes

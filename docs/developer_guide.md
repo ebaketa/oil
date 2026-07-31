@@ -52,9 +52,10 @@ from `drivers/__init__.py` and register its persistent inventory name with
 capabilities must describe only behavior implemented and verified by the
 driver.
 
-For hardware-free development, add an instrument with driver `Mock instrument`
-and address `mock://default`. Use `mock://timeout` to simulate a measurement
-timeout or `mock://connection-error` to simulate unavailable hardware.
+For hardware-free development, add an instrument with driver `Mock DMM`
+and address `mock-dmm://default`. Use `mock-dmm://timeout` to simulate a
+measurement timeout or `mock-dmm://connection-error` to simulate unavailable
+hardware.
 
 ## Instrument transports
 

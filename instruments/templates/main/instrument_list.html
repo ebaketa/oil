@@ -1,5 +1,6 @@
 {# Instruments domain template. #}
 {% extends "main/base.html" %}
+{% load static %}
 
 {% block title %}
 Instruments
@@ -18,16 +19,32 @@ Instruments
         <a class="btn btn-outline-secondary" href="{% url 'dashboard' %}">
             Back
         </a>
-        <a class="btn btn-primary" href="{% url 'instrument_create' %}">
-            Add instrument
-        </a>
+        {% if user.is_staff %}
+            <a class="btn btn-primary" href="{% url 'instrument_create' %}">
+                Add instrument
+            </a>
+            <button id="instrument-edit-button"
+                    class="btn btn-primary"
+                    type="button">
+                Edit
+            </button>
+            <button id="instrument-delete-button"
+                    class="btn btn-danger"
+                    type="button">
+                Delete
+            </button>
+            <form id="instrument-delete-form" method="post" class="d-none">
+                {% csrf_token %}
+            </form>
+        {% endif %}
     </div>
 </div>
 
 <div class="table-responsive">
-    <table class="table table-striped table-hover align-middle">
+    <table class="table align-middle">
         <thead>
             <tr>
+                <th scope="col">ID</th>
                 <th scope="col">Name</th>
                 <th scope="col">Manufacturer</th>
                 <th scope="col">Model</th>
@@ -38,20 +55,21 @@ Instruments
             </tr>
         </thead>
         <tbody>
-                {% for instrument in instruments %}
-                    <tr>
-                        <td>
-                            <a href="{% url 'instrument_edit' instrument.pk %}">
-                                {{ instrument.name }}
-                            </a>
-                        </td>
+            {% for instrument in instruments %}
+                <tr class="{% if user.is_staff %}oil-instrument-row{% else %}oil-instrument-detail-row{% endif %}{% if forloop.first %} table-active{% endif %}"
+                    data-detail-url="{% url 'instrument_detail' instrument.pk %}"
+                    title="Double-click to view instrument information"
+                    aria-selected="{% if forloop.first %}true{% else %}false{% endif %}"
+                    {% if user.is_staff %}
+                    data-edit-url="{% url 'instrument_edit' instrument.pk %}"
+                    data-delete-url="{% url 'instrument_delete' instrument.pk %}"
+                    data-instrument-name="{{ instrument.name }}"
+                    {% endif %}>
+                    <td>{{ instrument.pk }}</td>
+                    <td>{{ instrument.name }}</td>
                     <td>{{ instrument.manufacturer }}</td>
                     <td>{{ instrument.model_name }}</td>
-                    <td>
-                        <a href="{% url 'instrument_driver' instrument.pk %}">
-                            {{ instrument.get_driver_display }}
-                        </a>
-                    </td>
+                    <td>{{ instrument.get_driver_display }}</td>
                     <td><code>{{ instrument.address }}</code></td>
                     <td>
                         {% if instrument.is_online %}
@@ -80,7 +98,7 @@ Instruments
                 </tr>
             {% empty %}
                 <tr>
-                    <td colspan="7" class="text-center text-muted py-4">
+                    <td colspan="8" class="text-center text-muted py-4">
                         No instruments have been added yet.
                     </td>
                 </tr>
@@ -89,4 +107,8 @@ Instruments
     </table>
 </div>
 
+{% endblock %}
+
+{% block scripts %}
+<script src="{% static 'main/js/instrument-list.js' %}?v=6"></script>
 {% endblock %}

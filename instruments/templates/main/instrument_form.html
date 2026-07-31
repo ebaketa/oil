@@ -20,27 +20,87 @@
         {% endif %}
 
         {% for field in form %}
-            <div class="mb-3">
-                <label class="form-label" for="{{ field.id_for_label }}">
+            <div class="row mb-3 align-items-start">
+                <label class="col-4 col-form-label" for="{{ field.id_for_label }}">
                     {{ field.label }}
                 </label>
-                {{ field }}
-                {% if field.help_text %}
-                    <div class="form-text">{{ field.help_text }}</div>
-                {% endif %}
-                {% for error in field.errors %}
-                    <div class="invalid-feedback d-block">{{ error }}</div>
-                {% endfor %}
+                <div class="col-8">
+                    {{ field }}
+                    {% if field.help_text %}
+                        <div class="form-text">{{ field.help_text }}</div>
+                    {% endif %}
+                    {% for error in field.errors %}
+                        <div class="invalid-feedback d-block">{{ error }}</div>
+                    {% endfor %}
+                </div>
             </div>
         {% endfor %}
 
         <div class="d-flex gap-2">
-            <button class="btn btn-primary" type="submit">{{ submit_label }}</button>
+            {% if not instrument %}
+                <button class="btn btn-success"
+                        type="submit"
+                        name="action"
+                        value="test_connection">
+                    Test connection
+                </button>
+            {% endif %}
+            <button class="btn btn-primary"
+                    type="submit"
+                    name="action"
+                    value="save">
+                {{ submit_label }}
+            </button>
             <a class="btn btn-outline-secondary" href="{% url 'instrument_list' %}">
                 Cancel
             </a>
         </div>
     </form>
+
+    {% if connection_test_identity %}
+        <div class="alert alert-success mt-4" role="status">
+            Connection test passed:
+            <strong>{{ connection_test_identity }}</strong>
+        </div>
+    {% endif %}
+
+    {% if instrument %}
+        <div class="card shadow-sm mt-4">
+            <div class="card-body">
+                <h3 class="h5">Connection test</h3>
+                <p class="text-muted">
+                    Uses this instrument's configured driver and address,
+                    reads its identity, returns front-panel control, and closes
+                    the connection without changing measurement settings.
+                </p>
+                <form method="post"
+                      action="{% url 'instrument_driver_test' instrument.pk %}">
+                    {% csrf_token %}
+                    <button class="btn btn-primary" type="submit">
+                        Test driver
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mt-4">
+            <div class="card-body">
+                <h3 class="h5">DC Voltage Auto mode</h3>
+                <p class="text-muted">
+                    Removes stale SCPI errors, selects DC voltage with
+                    autorange, verifies each command, and reads the resulting
+                    configuration back from the instrument.
+                </p>
+                <form method="post"
+                      action="{% url 'instrument_driver_test_dcv' instrument.pk %}">
+                    {% csrf_token %}
+                    <button class="btn btn-primary" type="submit">
+                        Test DCV Auto
+                    </button>
+                </form>
+            </div>
+        </div>
+    {% endif %}
 </div>
 
 {% endblock %}
