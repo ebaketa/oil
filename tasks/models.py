@@ -158,6 +158,12 @@ class TaskSample(models.Model):
         null=True,
         blank=True,
     )
+    acquisition_time_seconds = models.DecimalField(
+        max_digits=10,
+        decimal_places=3,
+        null=True,
+        blank=True,
+    )
     timestamp = models.DateTimeField(default=timezone.now)
 
     class Meta:

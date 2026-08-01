@@ -505,7 +505,7 @@
         row.dataset.statusLabel = task.status_label;
         row.dataset.started = formatDateTime(task.started_at);
         row.dataset.measurementCount = task.sample_count;
-        row.querySelector("td").textContent = task.id;
+        row.querySelector("td").textContent = String(task.id).padStart(4, "0");
         row.querySelector("th").textContent = task.name;
         row.querySelector(".task-row-started").textContent = (
             formatDateTime(task.started_at)
@@ -633,6 +633,9 @@
         const timeHeader = document.createElement("th");
         timeHeader.textContent = "Time";
         header.append(timeHeader);
+        const acquisitionHeader = document.createElement("th");
+        acquisitionHeader.textContent = "Acquisition time";
+        header.append(acquisitionHeader);
         const instruments = task.instruments || [];
         const resultColumns = task.result_columns || instruments.map(
             (instrument) => ({
@@ -653,11 +656,19 @@
             .forEach((sample) => {
                 const row = document.createElement("tr");
                 const idCell = document.createElement("td");
-                idCell.textContent = sample.index;
+                idCell.textContent = String(sample.index).padStart(4, "0");
                 row.append(idCell);
                 const timeCell = document.createElement("td");
                 timeCell.textContent = formatDateTime(sample.timestamp);
                 row.append(timeCell);
+                const acquisitionCell = document.createElement("td");
+                acquisitionCell.textContent = (
+                    sample.acquisition_time_seconds === null
+                    || sample.acquisition_time_seconds === undefined
+                )
+                    ? "—"
+                    : `${Number(sample.acquisition_time_seconds).toFixed(3)} s`;
+                row.append(acquisitionCell);
                 resultColumns.forEach((column) => {
                     const cell = document.createElement("td");
                     const reading = (sample.readings || []).find(
@@ -683,6 +694,22 @@
                 });
                 rows.append(row);
             });
+
+        const scrollContainer = rows.closest(".task-sample-table-scroll");
+        const renderedRows = [...rows.children];
+        if (scrollContainer && renderedRows.length > 20) {
+            const headerHeight = header.closest("thead").getBoundingClientRect()
+                .height;
+            const rowsHeight = renderedRows.slice(0, 20).reduce(
+                (height, row) => height + row.getBoundingClientRect().height,
+                0,
+            );
+            const measuredHeight = headerHeight + rowsHeight;
+            scrollContainer.style.maxHeight = measuredHeight > 0
+                ? `${Math.ceil(measuredHeight)}px`
+                : "43.3125rem";
+            scrollContainer.style.overflowY = "auto";
+        }
     };
 
     const fetchTask = async (taskId, pane) => {

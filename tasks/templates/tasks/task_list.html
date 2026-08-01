@@ -104,7 +104,7 @@ Tasks
                             data-started="{{ task.started_at|date:'d.m.Y H:i:s' }}"
                             data-measurement-count="{{ task.sample_count }}"
                             aria-selected="{% if forloop.first %}true{% else %}false{% endif %}">
-                            <td>{{ task.pk }}</td>
+                            <td>{{ task.pk|stringformat:"04d" }}</td>
                             <th scope="row">{{ task.name }}</th>
                             <td class="task-row-started">
                                 {{ task.started_at|date:"d.m.Y H:i:s"|default:"—" }}
@@ -304,12 +304,14 @@ Tasks
             </div>
             <div class="text-danger task-detail-error"></div>
         </div>
-        <div class="table-responsive">
+        <div class="table-responsive oil-measurement-table-scroll
+                    task-sample-table-scroll">
             <table class="table table-sm">
                 <thead>
                     <tr class="task-results-header">
                         <th>ID</th>
                         <th>Time</th>
+                        <th>Acquisition time</th>
                     </tr>
                 </thead>
                 <tbody class="task-sample-rows"></tbody>
@@ -321,5 +323,5 @@ Tasks
 {% endblock %}
 
 {% block scripts %}
-<script src="{% static 'tasks/js/task_tabs.js' %}?v=18"></script>
+<script src="{% static 'tasks/js/task_tabs.js' %}?v=22"></script>
 {% endblock %}

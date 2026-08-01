@@ -2,7 +2,7 @@
 
 import json
 from decimal import Decimal
-from threading import Event
+from threading import Barrier, Event
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -11,6 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from main.models import Instrument
+from drivers.base import MeasurementResult
 
 from .models import (
     AutomationTask,
@@ -87,10 +88,12 @@ class TaskViewTests(TestCase):
         self.assertContains(response, 'id="saved-task-pane-template"')
         self.assertContains(response, 'id="saved-tasks-tab"')
         self.assertContains(response, 'id="task-status-filter"')
-        self.assertContains(response, "tasks/js/task_tabs.js?v=18")
+        self.assertContains(response, "tasks/js/task_tabs.js?v=22")
         self.assertContains(response, "task-stop-button")
         self.assertContains(response, "task-complete-button")
         self.assertContains(response, "saved-task-elapsed")
+        self.assertContains(response, "Acquisition time")
+        self.assertContains(response, "task-sample-table-scroll")
         self.assertContains(response, "Add instrument")
         self.assertContains(response, "task-instrument-select")
         self.assertContains(response, "task-instrument-tabs")
@@ -146,11 +149,26 @@ class TaskViewTests(TestCase):
             response,
             f'data-task-id="{own_task.pk}"',
         )
+        self.assertContains(response, f"<td>{own_task.pk:04d}</td>", html=True)
         self.assertNotContains(
             response,
             f'data-task-id="{other_task.pk}"',
         )
         self.assertContains(response, 'data-status="running"')
+
+    def test_saved_tasks_are_listed_newest_first(self):
+        """A newer saved task appears above an older task."""
+        older = AutomationTask.objects.create(user=self.user, name="Older task")
+        newer = AutomationTask.objects.create(user=self.user, name="Newer task")
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("task_list"))
+        content = response.content.decode()
+
+        self.assertLess(
+            content.index(f'data-task-id="{newer.pk}"'),
+            content.index(f'data-task-id="{older.pk}"'),
+        )
 
     def test_saved_task_list_includes_measurement_count(self):
         """Saved task rows contain the number of related measurements."""
@@ -373,6 +391,7 @@ class TaskViewTests(TestCase):
             task=task,
             index=1,
             voltage_setpoint=1,
+            acquisition_time_seconds=Decimal("0.523"),
         )
         self.client.force_login(self.user)
 
@@ -383,6 +402,10 @@ class TaskViewTests(TestCase):
         self.assertEqual(task.status, AutomationTask.Status.COMPLETED)
         self.assertEqual(response.json()["status"], "completed")
         self.assertEqual(response.json()["samples"][0]["index"], sample.index)
+        self.assertEqual(
+            response.json()["samples"][0]["acquisition_time_seconds"],
+            "0.523",
+        )
 
     def test_running_task_cannot_be_marked_as_completed(self):
         """An active task must be stopped before it can be finalized."""
@@ -614,6 +637,11 @@ class AutomationRunnerTests(TestCase):
             self.assertGreaterEqual(sample.measured_voltage, Decimal("0"))
             self.assertGreaterEqual(sample.temperature, Decimal("20"))
             self.assertLessEqual(sample.temperature, Decimal("21"))
+            self.assertIsNotNone(sample.acquisition_time_seconds)
+            self.assertGreaterEqual(
+                sample.acquisition_time_seconds,
+                Decimal("0"),
+            )
 
     def test_single_runner_stores_one_measurement(self):
         """Single mode stops after the first synchronized reading."""
@@ -702,3 +730,49 @@ class AutomationRunnerTests(TestCase):
             parameter="Voltage DC",
         )
         self.assertEqual(voltage_readings.count(), 3)
+
+    def test_different_physical_instruments_are_read_in_parallel(self):
+        """Separate DMM connections begin acquisition concurrently."""
+        second_meter = Instrument.objects.create(
+            name="Runner DMM 2",
+            manufacturer="OIL",
+            model_name="Mock DMM",
+            driver=Instrument.Driver.MOCK,
+            address="mock-dmm://second",
+        )
+        task = AutomationTask.objects.create(
+            user=self.user,
+            name="Parallel DMM read",
+            measurement_mode=AutomationTask.MeasurementMode.SINGLE,
+            interval_seconds=1,
+        )
+        for order, instrument in enumerate((self.meter, second_meter)):
+            TaskInstrument.objects.create(
+                task=task,
+                instrument=instrument,
+                order=order,
+                configuration={
+                    "function": "dc_voltage",
+                    "source": "external",
+                },
+            )
+
+        rendezvous = Barrier(2)
+
+        def measure(_driver):
+            rendezvous.wait(timeout=1)
+            return MeasurementResult("Voltage DC", 1.0, "V")
+
+        with patch(
+            "drivers.mock.MockInstrumentDriver.measure_dc_voltage",
+            autospec=True,
+            side_effect=measure,
+        ):
+            run_automation_task(task.pk)
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, AutomationTask.Status.COMPLETED)
+        self.assertEqual(
+            TaskReading.objects.filter(sample__task=task).count(),
+            2,
+        )

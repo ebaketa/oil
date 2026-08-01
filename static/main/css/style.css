@@ -182,6 +182,14 @@ body.oil-theme {
     background-color: var(--bs-body-bg);
 }
 
+.task-sample-table-scroll {
+    max-height: 43.3125rem;
+}
+
+.task-sample-table-scroll tr {
+    height: 2.0625rem;
+}
+
 .nav-link:hover {
     text-decoration: underline;
 }

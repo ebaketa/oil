@@ -336,7 +336,7 @@ class Keysight34461ADriverTests(SimpleTestCase):
         )
         self.assertEqual(
             [call.args[0] for call in sleep.call_args_list],
-            [0.5, 0.1, 0.1, 0.5],
+            [0.5, 0.1, 0.1],
         )
         self.assertEqual(
             result,
@@ -367,7 +367,7 @@ class Keysight34461ADriverTests(SimpleTestCase):
         )
         self.assertEqual(
             [call.args[0] for call in sleep.call_args_list],
-            [0.5, 0.1, 0.1, 0.5, 0.5],
+            [0.5, 0.1, 0.1],
         )
         self.assertEqual(first.value, 1.0)
         self.assertEqual(second.value, 2.0)

@@ -201,6 +201,11 @@ def _serialize_task(task, *, include_samples=False):
                     else None
                 ),
                 "timestamp": sample.timestamp.isoformat(),
+                "acquisition_time_seconds": (
+                    str(sample.acquisition_time_seconds)
+                    if sample.acquisition_time_seconds is not None
+                    else None
+                ),
                 "readings": readings,
                 },
             )
@@ -221,6 +226,7 @@ def task_list(request):
         .annotate(
             sample_count=Count("samples"),
         )
+        .order_by("-created_at", "-pk")
     )
     available_instruments = []
     for instrument in Instrument.objects.all():

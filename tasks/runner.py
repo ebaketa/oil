@@ -66,6 +66,16 @@ def measurement_sequence(task, base_sequence):
     return repeat(base_sequence[-1])
 
 
+def _read_instrument_group(assignments, drivers):
+    """Read one instrument's assignments serially within a worker thread."""
+    readings = {}
+    for assignment in assignments:
+        function = assignment.configuration["function"]
+        driver = drivers[assignment.instrument_id]
+        readings[assignment.pk] = getattr(driver, f"measure_{function}")()
+    return readings
+
+
 def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
     """Execute one task and persist synchronized samples."""
     close_old_connections()
@@ -168,6 +178,28 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
             )
             supply = drivers.get(supply_id)
 
+            physical_groups = {}
+            for assignment in assignments:
+                config = assignment.configuration
+                if (
+                    assignment is supply_assignment
+                    or config.get("function") == "temperature"
+                    or config.get("source") == "virtual"
+                ):
+                    continue
+                physical_groups.setdefault(
+                    assignment.instrument_id,
+                    [],
+                ).append(assignment)
+            measurement_executor = None
+            if len(physical_groups) > 1:
+                measurement_executor = stack.enter_context(
+                    ThreadPoolExecutor(
+                        max_workers=len(physical_groups),
+                        thread_name_prefix="oil-acquisition",
+                    ),
+                )
+
             base_sequence = (
                 voltage_sequence(task)
                 if supply
@@ -188,6 +220,7 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
                     task.status = AutomationTask.Status.STOPPED
                     break
 
+                acquisition_started = monotonic()
                 triggered_at = timezone.now()
                 if supply:
                     supply.set_voltage(voltage)
@@ -218,6 +251,23 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
                 )
 
                 if flexible:
+                    physical_results = {}
+                    if measurement_executor is not None:
+                        futures = [
+                            measurement_executor.submit(
+                                _read_instrument_group,
+                                group,
+                                drivers,
+                            )
+                            for group in physical_groups.values()
+                        ]
+                        for future in futures:
+                            physical_results.update(future.result())
+                    else:
+                        for group in physical_groups.values():
+                            physical_results.update(
+                                _read_instrument_group(group, drivers),
+                            )
                     for assignment in assignments:
                         if assignment is supply_assignment:
                             TaskReading.objects.create(
@@ -263,9 +313,7 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
                             if measured_voltage is None:
                                 measured_voltage = value
                         else:
-                            driver = drivers[assignment.instrument_id]
-                            method = getattr(driver, f"measure_{function}")
-                            result = method()
+                            result = physical_results[assignment.pk]
                             value = Decimal(str(result.value))
                             parameter = result.parameter
                             unit = result.unit
@@ -297,8 +345,15 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
 
                 sample.measured_voltage = measured_voltage
                 sample.temperature = temperature
+                sample.acquisition_time_seconds = Decimal(
+                    str(monotonic() - acquisition_started),
+                ).quantize(Decimal("0.001"))
                 sample.save(
-                    update_fields=("measured_voltage", "temperature"),
+                    update_fields=(
+                        "measured_voltage",
+                        "temperature",
+                        "acquisition_time_seconds",
+                    ),
                 )
 
             else:

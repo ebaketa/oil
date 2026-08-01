@@ -185,7 +185,6 @@ class Keysight34461ADriver(BaseInstrumentDriver):
                 autorange_command,
             )
             self.write("READ?")
-            time.sleep(0.5)
             value = float(self.read_response())
         except (ValueError, CommunicationError) as exc:
             raise MeasurementError(
