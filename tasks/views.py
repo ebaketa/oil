@@ -3,10 +3,11 @@
 from django.contrib.auth.decorators import login_required
 import json
 import csv
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Max, Min, Q
 from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import render
 from django.utils import timezone
@@ -16,7 +17,7 @@ from instruments.models import Instrument
 from measurements.exports import safe_spreadsheet_text
 
 from .forms import TaskBuilderForm
-from .models import AutomationTask, TaskInstrument
+from .models import AutomationTask, TaskInstrument, TaskSample
 from .runner import TaskRunner
 
 
@@ -35,7 +36,7 @@ def _voltage_decimal_places(instrument):
     return max(0, -limits["step"].as_tuple().exponent)
 
 
-def _serialize_task(task, *, include_samples=False):
+def _serialize_task(task, *, include_samples=False, samples_queryset=None):
     """Return one task and optionally its stored samples."""
     task_instruments = list(
         task.task_instruments.select_related("instrument").all(),
@@ -133,7 +134,11 @@ def _serialize_task(task, *, include_samples=False):
             "seconds": int(task.interval_seconds % 60),
             "hundredths": int(round(task.interval_seconds * 100)) % 100,
         },
-        "sample_count": getattr(task, "sample_count", task.samples.count()),
+        "sample_count": getattr(
+            task,
+            "sample_count",
+            task.samples.exclude(status=TaskSample.Status.ACQUIRING).count(),
+        ),
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "finished_at": (
             task.finished_at.isoformat() if task.finished_at else None
@@ -144,7 +149,15 @@ def _serialize_task(task, *, include_samples=False):
     }
     if include_samples:
         samples = []
-        for sample in task.samples.all():
+        recent_samples = samples_queryset
+        if recent_samples is None:
+            recent_samples = task.samples.exclude(
+                status=TaskSample.Status.ACQUIRING,
+            ).order_by("-index")[:200]
+        recent_samples = recent_samples.prefetch_related(
+            "readings__task_instrument__instrument",
+        )
+        for sample in recent_samples:
             readings = [
                 {
                     "instrument": reading.task_instrument.instrument.name,
@@ -201,6 +214,8 @@ def _serialize_task(task, *, include_samples=False):
                     else None
                 ),
                 "timestamp": sample.timestamp.isoformat(),
+                "status": sample.status,
+                "error": sample.error,
                 "acquisition_time_seconds": (
                     str(sample.acquisition_time_seconds)
                     if sample.acquisition_time_seconds is not None
@@ -224,7 +239,10 @@ def task_list(request):
             "temperature_meter",
         )
         .annotate(
-            sample_count=Count("samples"),
+            sample_count=Count(
+                "samples",
+                filter=~Q(samples__status=TaskSample.Status.ACQUIRING),
+            ),
         )
         .order_by("-created_at", "-pk")
     )
@@ -487,15 +505,70 @@ def task_detail(request, pk):
                 "voltage_meter",
                 "temperature_meter",
             )
-            .prefetch_related("samples")
-            .prefetch_related(
-                "samples__readings__task_instrument__instrument",
-            )
             .get(pk=pk, user=request.user)
         )
     except AutomationTask.DoesNotExist:
         return JsonResponse({"error": "Task was not found."}, status=404)
     return JsonResponse(_serialize_task(task, include_samples=True))
+
+
+@login_required
+@require_GET
+def task_chart_data(request, pk):
+    """Return a bounded, evenly sampled time range for a task chart."""
+    try:
+        task = AutomationTask.objects.get(pk=pk, user=request.user)
+    except AutomationTask.DoesNotExist:
+        return JsonResponse({"error": "Task was not found."}, status=404)
+
+    range_name = request.GET.get("range", "hour")
+    range_seconds = {
+        "hour": 3600,
+        "day": 86400,
+        "week": 604800,
+        "month": 2592000,
+        "year": 31536000,
+        "all": None,
+    }
+    if range_name not in range_seconds:
+        return JsonResponse({"error": "Invalid chart range."}, status=400)
+
+    samples = task.samples.exclude(status=TaskSample.Status.ACQUIRING)
+    latest_timestamp = samples.aggregate(latest=Max("timestamp"))["latest"]
+    seconds = range_seconds[range_name]
+    if latest_timestamp is not None and seconds is not None:
+        samples = samples.filter(
+            timestamp__gte=latest_timestamp - timedelta(seconds=seconds),
+        )
+
+    summary = samples.aggregate(
+        count=Count("id"),
+        first_index=Min("index"),
+        last_index=Max("index"),
+    )
+    if summary["count"] > 1000:
+        first_index = summary["first_index"]
+        last_index = summary["last_index"]
+        span = last_index - first_index
+        selected_indices = {
+            round(first_index + span * position / 999)
+            for position in range(1000)
+        }
+        samples = samples.filter(index__in=selected_indices)
+
+    payload = _serialize_task(
+        task,
+        include_samples=True,
+        samples_queryset=samples.order_by("index"),
+    )
+    return JsonResponse(
+        {
+            "range": range_name,
+            "sample_count": summary["count"],
+            "samples": payload["samples"],
+            "result_columns": payload["result_columns"],
+        },
+    )
 
 
 @login_required
@@ -623,7 +696,9 @@ def task_export_csv(request, pk):
                 ),
             ),
         )
-        for sample in task.samples.all():
+        for sample in task.samples.exclude(
+            status=TaskSample.Status.ACQUIRING,
+        ):
             sample_readings = list(sample.readings.all())
             if not assignments:
                 legacy_values = {

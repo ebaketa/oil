@@ -35,6 +35,7 @@ class Keysight34461ADriver(BaseInstrumentDriver):
         *,
         voltage_range: float = 10,
         nplc: float = 100,
+        response_timeout: float = 10,
         open_device: Callable[..., BinaryIO] = open,
         transport: InstrumentTransport | None = None,
     ) -> None:
@@ -43,6 +44,7 @@ class Keysight34461ADriver(BaseInstrumentDriver):
         self.device_path = device_path
         self.voltage_range = voltage_range
         self.nplc = nplc
+        self.response_timeout = response_timeout
         self._open_device = open_device
         self.transport = transport or USBTMCTransport(
             device_path,
@@ -105,7 +107,7 @@ class Keysight34461ADriver(BaseInstrumentDriver):
         """Read and decode one response from the USBTMC device."""
         if not self.transport.is_open:
             raise CommunicationError("The Keysight 34461A is not connected.")
-        return self.transport.read()
+        return self.transport.read(timeout=self.response_timeout)
 
     def query(self, command: str) -> str:
         """Send one SCPI query and return its response."""

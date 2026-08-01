@@ -283,7 +283,7 @@ Tasks
                     </button>
                 </div>
             </div>
-            <div class="d-flex flex-wrap align-items-center gap-4 mb-3">
+            <div class="d-flex flex-wrap align-items-center gap-4">
                 <div>
                     <strong>Started:</strong>
                     <span class="saved-task-started"></span>
@@ -304,6 +304,32 @@ Tasks
             </div>
             <div class="text-danger task-detail-error"></div>
         </div>
+        <div class="card mb-3 task-live-chart-card">
+            <div class="card-body">
+                <div class="d-flex flex-wrap align-items-center gap-3 mb-2">
+                    <h4 class="h6 mb-0">Live chart</h4>
+                    <div class="d-flex flex-wrap gap-3 task-chart-legend"></div>
+                    <label class="d-flex align-items-center gap-2 ms-auto mb-0">
+                        <span class="small text-muted">Range</span>
+                        <select class="form-select form-select-sm task-chart-range">
+                            <option value="hour">Hour</option>
+                            <option value="day">Day</option>
+                            <option value="week">Week</option>
+                            <option value="month">Month</option>
+                            <option value="year">Year</option>
+                            <option value="all">All</option>
+                        </select>
+                    </label>
+                </div>
+                <canvas class="task-live-chart"
+                        height="320"
+                        aria-label="Live instrument results chart"
+                        role="img"></canvas>
+                <p class="text-muted mb-0 task-chart-empty">
+                    Waiting for measurement results…
+                </p>
+            </div>
+        </div>
         <div class="table-responsive oil-measurement-table-scroll
                     task-sample-table-scroll">
             <table class="table table-sm">
@@ -323,5 +349,5 @@ Tasks
 {% endblock %}
 
 {% block scripts %}
-<script src="{% static 'tasks/js/task_tabs.js' %}?v=22"></script>
+<script src="{% static 'tasks/js/task_tabs.js' %}?v=30"></script>
 {% endblock %}

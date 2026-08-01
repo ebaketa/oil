@@ -76,6 +76,18 @@ def _read_instrument_group(assignments, drivers):
     return readings
 
 
+def _mark_sample_failed(sample, acquisition_started, exc):
+    """Persist one failed acquisition without stopping its parent task."""
+    sample.status = TaskSample.Status.FAILED
+    sample.error = str(exc) or exc.__class__.__name__
+    sample.acquisition_time_seconds = Decimal(
+        str(monotonic() - acquisition_started),
+    ).quantize(Decimal("0.001"))
+    sample.save(
+        update_fields=("status", "error", "acquisition_time_seconds"),
+    )
+
+
 def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
     """Execute one task and persist synchronized samples."""
     close_old_connections()
@@ -248,26 +260,31 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
                     index=index,
                     voltage_setpoint=voltage,
                     timestamp=triggered_at,
+                    status=TaskSample.Status.ACQUIRING,
                 )
 
                 if flexible:
                     physical_results = {}
-                    if measurement_executor is not None:
-                        futures = [
-                            measurement_executor.submit(
-                                _read_instrument_group,
-                                group,
-                                drivers,
-                            )
-                            for group in physical_groups.values()
-                        ]
-                        for future in futures:
-                            physical_results.update(future.result())
-                    else:
-                        for group in physical_groups.values():
-                            physical_results.update(
-                                _read_instrument_group(group, drivers),
-                            )
+                    try:
+                        if measurement_executor is not None:
+                            futures = [
+                                measurement_executor.submit(
+                                    _read_instrument_group,
+                                    group,
+                                    drivers,
+                                )
+                                for group in physical_groups.values()
+                            ]
+                            for future in futures:
+                                physical_results.update(future.result())
+                        else:
+                            for group in physical_groups.values():
+                                physical_results.update(
+                                    _read_instrument_group(group, drivers),
+                                )
+                    except Exception as exc:
+                        _mark_sample_failed(sample, acquisition_started, exc)
+                        continue
                     for assignment in assignments:
                         if assignment is supply_assignment:
                             TaskReading.objects.create(
@@ -335,9 +352,17 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
                             supply.measure_output_voltage(),
                         )
                     else:
-                        result = drivers[
-                            task.voltage_meter_id
-                        ].measure_dc_voltage()
+                        try:
+                            result = drivers[
+                                task.voltage_meter_id
+                            ].measure_dc_voltage()
+                        except Exception as exc:
+                            _mark_sample_failed(
+                                sample,
+                                acquisition_started,
+                                exc,
+                            )
+                            continue
                         measured_voltage = Decimal(str(result.value))
 
                 if not flexible and task.temperature_meter_id:
@@ -345,6 +370,7 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
 
                 sample.measured_voltage = measured_voltage
                 sample.temperature = temperature
+                sample.status = TaskSample.Status.COMPLETED
                 sample.acquisition_time_seconds = Decimal(
                     str(monotonic() - acquisition_started),
                 ).quantize(Decimal("0.001"))
@@ -352,6 +378,7 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
                     update_fields=(
                         "measured_voltage",
                         "temperature",
+                        "status",
                         "acquisition_time_seconds",
                     ),
                 )

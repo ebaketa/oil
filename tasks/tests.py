@@ -1,6 +1,7 @@
 """Tests for the Task application."""
 
 import json
+from datetime import timedelta
 from decimal import Decimal
 from threading import Barrier, Event
 from unittest.mock import patch
@@ -12,6 +13,7 @@ from django.utils import timezone
 
 from main.models import Instrument
 from drivers.base import MeasurementResult
+from drivers.exceptions import MeasurementError
 
 from .models import (
     AutomationTask,
@@ -88,11 +90,16 @@ class TaskViewTests(TestCase):
         self.assertContains(response, 'id="saved-task-pane-template"')
         self.assertContains(response, 'id="saved-tasks-tab"')
         self.assertContains(response, 'id="task-status-filter"')
-        self.assertContains(response, "tasks/js/task_tabs.js?v=22")
+        self.assertContains(response, "tasks/js/task_tabs.js?v=30")
         self.assertContains(response, "task-stop-button")
         self.assertContains(response, "task-complete-button")
         self.assertContains(response, "saved-task-elapsed")
         self.assertContains(response, "Acquisition time")
+        self.assertContains(response, "Live chart")
+        self.assertContains(response, "task-live-chart")
+        self.assertContains(response, '<option value="week">Week</option>')
+        self.assertContains(response, '<option value="month">Month</option>')
+        self.assertNotContains(response, "Last week")
         self.assertContains(response, "task-sample-table-scroll")
         self.assertContains(response, "Add instrument")
         self.assertContains(response, "task-instrument-select")
@@ -211,7 +218,7 @@ class TaskViewTests(TestCase):
         response = self.client.get(reverse("task_list"))
 
         self.assertContains(response, '<th scope="col">ID</th>', html=True)
-        self.assertContains(response, f"<td>{task.pk}</td>", html=True)
+        self.assertContains(response, f"<td>{task.pk:04d}</td>", html=True)
         self.assertContains(response, "task-row table-active")
         self.assertContains(response, 'aria-selected="true"')
 
@@ -306,6 +313,57 @@ class TaskViewTests(TestCase):
         response = self.client.get(reverse("task_detail", args=[task.pk]))
 
         self.assertEqual(response.status_code, 404)
+
+    def test_chart_data_downsamples_long_ranges(self):
+        """A chart range stays bounded while reporting its full sample count."""
+        task = AutomationTask.objects.create(user=self.user, name="Chart task")
+        started = timezone.now() - timedelta(seconds=1004)
+        TaskSample.objects.bulk_create(
+            TaskSample(
+                task=task,
+                index=index,
+                voltage_setpoint=0,
+                timestamp=started + timedelta(seconds=index - 1),
+            )
+            for index in range(1, 1006)
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            reverse("task_chart_data", args=[task.pk]),
+            {"range": "month"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["sample_count"], 1005)
+        self.assertLessEqual(len(response.json()["samples"]), 1000)
+
+    def test_task_detail_hides_an_in_progress_sample(self):
+        """Polling exposes a sample only after its acquisition has finished."""
+        task = AutomationTask.objects.create(user=self.user, name="Active task")
+        TaskSample.objects.create(
+            task=task,
+            index=1,
+            voltage_setpoint=0,
+            status=TaskSample.Status.COMPLETED,
+            acquisition_time_seconds=Decimal("0.500"),
+        )
+        TaskSample.objects.create(
+            task=task,
+            index=2,
+            voltage_setpoint=0,
+            status=TaskSample.Status.ACQUIRING,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("task_detail", args=[task.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["sample_count"], 1)
+        self.assertEqual(
+            [sample["index"] for sample in response.json()["samples"]],
+            [1],
+        )
 
     def test_owner_can_stop_task_after_server_restart(self):
         """A task without an in-process worker can still be stopped."""
@@ -776,3 +834,41 @@ class AutomationRunnerTests(TestCase):
             TaskReading.objects.filter(sample__task=task).count(),
             2,
         )
+
+    def test_failed_sample_does_not_stop_later_acquisitions(self):
+        """A transient instrument error marks one sample and continues."""
+        task = AutomationTask.objects.create(
+            user=self.user,
+            name="Recover after failed sample",
+            measurement_mode=AutomationTask.MeasurementMode.LOOP,
+            requested_samples=2,
+            interval_seconds=0.01,
+        )
+        TaskInstrument.objects.create(
+            task=task,
+            instrument=self.meter,
+            configuration={
+                "function": "dc_voltage",
+                "source": "external",
+            },
+        )
+
+        with patch(
+            "drivers.mock.MockInstrumentDriver.measure_dc_voltage",
+            autospec=True,
+            side_effect=(
+                MeasurementError("temporary timeout"),
+                MeasurementResult("Voltage DC", 1.25, "V"),
+            ),
+        ):
+            run_automation_task(task.pk)
+
+        task.refresh_from_db()
+        samples = list(task.samples.all())
+        self.assertEqual(task.status, AutomationTask.Status.COMPLETED)
+        self.assertEqual(
+            [sample.status for sample in samples],
+            [TaskSample.Status.FAILED, TaskSample.Status.COMPLETED],
+        )
+        self.assertIn("temporary timeout", samples[0].error)
+        self.assertEqual(samples[1].readings.count(), 1)

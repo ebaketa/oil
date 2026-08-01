@@ -139,6 +139,11 @@ class AutomationTask(models.Model):
 class TaskSample(models.Model):
     """Store one synchronized automation-task sample."""
 
+    class Status(models.TextChoices):
+        ACQUIRING = "acquiring", "Acquiring"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
     task = models.ForeignKey(
         AutomationTask,
         on_delete=models.CASCADE,
@@ -164,6 +169,12 @@ class TaskSample(models.Model):
         null=True,
         blank=True,
     )
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.COMPLETED,
+    )
+    error = models.TextField(blank=True)
     timestamp = models.DateTimeField(default=timezone.now)
 
     class Meta:

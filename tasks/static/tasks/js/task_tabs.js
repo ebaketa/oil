@@ -76,6 +76,254 @@
         return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
     };
 
+    const chartColors = [
+        "#0d6efd",
+        "#dc3545",
+        "#198754",
+        "#fd7e14",
+        "#6f42c1",
+        "#0dcaf0",
+    ];
+
+    const renderLiveChart = (pane, task, resultColumns) => {
+        const canvas = pane.querySelector(".task-live-chart");
+        const legend = pane.querySelector(".task-chart-legend");
+        const empty = pane.querySelector(".task-chart-empty");
+        const samples = [...(task.samples || [])].filter(
+            (sample) => sample.acquisition_time_seconds !== null
+                || sample.status === "failed",
+        ).sort(
+            (left, right) => left.index - right.index,
+        );
+        const findReading = (sample, column) => (sample.readings || []).find(
+            (candidate) => (
+                String(candidate.assignment_id)
+                    === String(column.assignment_id)
+                && (
+                    !column.parameter
+                    || candidate.parameter === column.parameter
+                )
+            ),
+        );
+        const datasets = resultColumns.map((column, index) => ({
+            column,
+            color: chartColors[index % chartColors.length],
+            points: samples.map((sample) => {
+                if (sample.status === "failed") {
+                    return null;
+                }
+                const reading = findReading(sample, column);
+                if (!reading || !Number.isFinite(Number(reading.value))) {
+                    return null;
+                }
+                return Number(reading.value);
+            }),
+        }));
+        const values = datasets.flatMap(
+            (dataset) => dataset.points.filter((value) => value !== null),
+        );
+
+        legend.replaceChildren();
+        datasets.forEach((dataset) => {
+            const item = document.createElement("span");
+            item.className = "task-chart-legend-item";
+            const swatch = document.createElement("span");
+            swatch.className = "task-chart-legend-swatch";
+            swatch.style.backgroundColor = dataset.color;
+            item.append(swatch, document.createTextNode(dataset.column.label));
+            legend.append(item);
+        });
+
+        const hasData = samples.length > 0 && values.length > 0;
+        canvas.classList.toggle("d-none", !hasData);
+        empty.classList.toggle("d-none", hasData);
+        if (!hasData) {
+            return;
+        }
+
+        window.requestAnimationFrame(() => {
+            const width = Math.max(320, canvas.clientWidth);
+            const height = 320;
+            const ratio = window.devicePixelRatio || 1;
+            canvas.width = Math.round(width * ratio);
+            canvas.height = Math.round(height * ratio);
+            const context = canvas.getContext("2d");
+            context.setTransform(ratio, 0, 0, ratio, 0, 0);
+            context.clearRect(0, 0, width, height);
+
+            const plot = {left: 72, right: width - 18, top: 18, bottom: 278};
+            let minimum = Math.min(...values);
+            let maximum = Math.max(...values);
+            const span = maximum - minimum;
+            const margin = span > 0
+                ? span * 0.08
+                : Math.max(Math.abs(maximum) * 0.001, 0.001);
+            minimum -= margin;
+            maximum += margin;
+
+            const styles = getComputedStyle(canvas);
+            const foreground = styles.color || "#212529";
+            const grid = "rgba(128, 128, 128, 0.25)";
+            context.font = "12px system-ui, sans-serif";
+            context.fillStyle = foreground;
+            context.strokeStyle = grid;
+            context.lineWidth = 1;
+
+            for (let step = 0; step <= 5; step += 1) {
+                const fraction = step / 5;
+                const y = plot.bottom - fraction * (plot.bottom - plot.top);
+                context.beginPath();
+                context.moveTo(plot.left, y);
+                context.lineTo(plot.right, y);
+                context.stroke();
+                const value = minimum + fraction * (maximum - minimum);
+                context.textAlign = "right";
+                context.textBaseline = "middle";
+                context.fillText(value.toPrecision(6), plot.left - 8, y);
+            }
+
+            const xFor = (index) => plot.left + (
+                samples.length === 1
+                    ? 0
+                    : index / (samples.length - 1)
+                        * (plot.right - plot.left)
+            );
+            const yFor = (value) => plot.bottom - (
+                (value - minimum) / (maximum - minimum)
+                * (plot.bottom - plot.top)
+            );
+            datasets.forEach((dataset) => {
+                context.strokeStyle = dataset.color;
+                context.lineWidth = 1.75;
+                context.beginPath();
+                let drawing = false;
+                dataset.points.forEach((value, index) => {
+                    if (value === null) {
+                        drawing = false;
+                        return;
+                    }
+                    const x = xFor(index);
+                    const y = yFor(value);
+                    if (!drawing) {
+                        context.moveTo(x, y);
+                        drawing = true;
+                    } else {
+                        context.lineTo(x, y);
+                    }
+                });
+                context.stroke();
+            });
+
+            const formatChartTime = (value) => new Date(value).toLocaleTimeString();
+            context.fillStyle = foreground;
+            context.textBaseline = "top";
+            context.textAlign = "left";
+            context.fillText(formatChartTime(samples[0].timestamp), plot.left, 288);
+            context.textAlign = "right";
+            context.fillText(
+                formatChartTime(samples[samples.length - 1].timestamp),
+                plot.right,
+                288,
+            );
+
+            const baseImage = context.getImageData(
+                0,
+                0,
+                canvas.width,
+                canvas.height,
+            );
+            const restoreChart = () => {
+                context.setTransform(1, 0, 0, 1, 0, 0);
+                context.putImageData(baseImage, 0, 0);
+                context.setTransform(ratio, 0, 0, ratio, 0, 0);
+            };
+            const highlightSample = (sampleIndex) => {
+                restoreChart();
+                const x = xFor(sampleIndex);
+                context.strokeStyle = "rgba(128, 128, 128, 0.65)";
+                context.lineWidth = 1;
+                context.beginPath();
+                context.moveTo(x, plot.top);
+                context.lineTo(x, plot.bottom);
+                context.stroke();
+
+                const tooltipLines = [
+                    formatDateTime(samples[sampleIndex].timestamp),
+                ];
+                datasets.forEach((dataset) => {
+                    const value = dataset.points[sampleIndex];
+                    if (value === null) {
+                        return;
+                    }
+                    const reading = findReading(
+                        samples[sampleIndex],
+                        dataset.column,
+                    );
+                    const decimals = dataset.column.decimals;
+                    const formattedValue = Number.isInteger(decimals)
+                        ? value.toFixed(decimals)
+                        : String(value);
+                    tooltipLines.push(
+                        `${dataset.column.label}: ${formattedValue}`
+                        + `${reading?.unit ? ` ${reading.unit}` : ""}`,
+                    );
+                    context.fillStyle = dataset.color;
+                    context.strokeStyle = "#ffffff";
+                    context.lineWidth = 1.5;
+                    context.beginPath();
+                    context.arc(x, yFor(value), 4.5, 0, Math.PI * 2);
+                    context.fill();
+                    context.stroke();
+                });
+
+                context.font = "12px system-ui, sans-serif";
+                const tooltipWidth = Math.max(
+                    ...tooltipLines.map((line) => context.measureText(line).width),
+                ) + 20;
+                const tooltipHeight = tooltipLines.length * 19 + 12;
+                let tooltipX = x + 10;
+                if (tooltipX + tooltipWidth > width - 4) {
+                    tooltipX = x - tooltipWidth - 10;
+                }
+                const tooltipY = plot.top + 8;
+                context.fillStyle = "rgba(33, 37, 41, 0.92)";
+                context.fillRect(
+                    tooltipX,
+                    tooltipY,
+                    tooltipWidth,
+                    tooltipHeight,
+                );
+                context.fillStyle = "#ffffff";
+                context.textAlign = "left";
+                context.textBaseline = "top";
+                tooltipLines.forEach((line, index) => {
+                    context.fillText(
+                        line,
+                        tooltipX + 10,
+                        tooltipY + 7 + index * 19,
+                    );
+                });
+            };
+
+            canvas.onmousemove = (event) => {
+                const bounds = canvas.getBoundingClientRect();
+                const pointerX = event.clientX - bounds.left;
+                if (pointerX < plot.left || pointerX > plot.right) {
+                    restoreChart();
+                    return;
+                }
+                const fraction = (pointerX - plot.left) / (
+                    plot.right - plot.left
+                );
+                const sampleIndex = samples.length === 1
+                    ? 0
+                    : Math.round(fraction * (samples.length - 1));
+                highlightSample(sampleIndex);
+            };
+            canvas.onmouseleave = restoreChart;
+        });
+    };
+
     const activateTab = (trigger) => {
         bootstrap.Tab.getOrCreateInstance(trigger).show();
     };
@@ -644,6 +892,47 @@
                 label: instrument.name,
             }),
         );
+        pane.currentTask = task;
+        if (pane.chartSamples) {
+            const samplesByIndex = new Map(
+                pane.chartSamples.map((sample) => [sample.index, sample]),
+            );
+            (task.samples || []).forEach((sample) => {
+                samplesByIndex.set(sample.index, sample);
+            });
+            let mergedSamples = [...samplesByIndex.values()].sort(
+                (left, right) => left.index - right.index,
+            );
+            const rangeSeconds = {
+                hour: 3600,
+                day: 86400,
+                week: 604800,
+                month: 2592000,
+                year: 31536000,
+            }[pane.querySelector(".task-chart-range").value];
+            if (rangeSeconds && mergedSamples.length) {
+                const latest = new Date(
+                    mergedSamples[mergedSamples.length - 1].timestamp,
+                ).getTime();
+                mergedSamples = mergedSamples.filter((sample) => (
+                    new Date(sample.timestamp).getTime()
+                    >= latest - rangeSeconds * 1000
+                ));
+            }
+            if (mergedSamples.length > 1200) {
+                const stride = Math.ceil(mergedSamples.length / 1000);
+                mergedSamples = mergedSamples.filter(
+                    (_sample, index) => index % stride === 0
+                        || index === mergedSamples.length - 1,
+                );
+            }
+            pane.chartSamples = mergedSamples;
+        }
+        renderLiveChart(
+            pane,
+            {...task, samples: pane.chartSamples || task.samples},
+            pane.chartResultColumns || resultColumns,
+        );
         resultColumns.forEach((column) => {
             const cell = document.createElement("th");
             cell.textContent = column.label;
@@ -652,11 +941,22 @@
 
         rows.replaceChildren();
         [...(task.samples || [])]
+            .filter(
+                (sample) => sample.acquisition_time_seconds !== null
+                    || sample.status === "failed",
+            )
             .sort((left, right) => right.index - left.index)
             .forEach((sample) => {
                 const row = document.createElement("tr");
+                row.classList.toggle("table-danger", sample.status === "failed");
+                if (sample.error) {
+                    row.title = `FAILED: ${sample.error}`;
+                }
                 const idCell = document.createElement("td");
                 idCell.textContent = String(sample.index).padStart(4, "0");
+                if (sample.status === "failed") {
+                    idCell.textContent += " FAILED";
+                }
                 row.append(idCell);
                 const timeCell = document.createElement("td");
                 timeCell.textContent = formatDateTime(sample.timestamp);
@@ -725,17 +1025,39 @@
         }
     };
 
+    const fetchChartData = async (taskId, pane) => {
+        const range = pane.querySelector(".task-chart-range").value;
+        const response = await fetch(
+            `/tasks/${taskId}/chart/?range=${encodeURIComponent(range)}`,
+        );
+        if (!response.ok) {
+            throw new Error("Chart data could not be loaded.");
+        }
+        const payload = await response.json();
+        pane.chartSamples = payload.samples || [];
+        pane.chartResultColumns = payload.result_columns || [];
+        if (pane.currentTask) {
+            renderLiveChart(
+                pane,
+                {...pane.currentTask, samples: pane.chartSamples},
+                pane.chartResultColumns,
+            );
+        }
+    };
+
     const startPolling = (taskId, pane) => {
-        fetchTask(taskId, pane).catch((error) => {
-            pane.querySelector(".task-detail-error").textContent = error.message;
-        });
-        pane.taskPollTimer = window.setInterval(() => {
+        const poll = () => {
             fetchTask(taskId, pane).catch((error) => {
                 pane.querySelector(".task-detail-error").textContent = (
                     error.message
                 );
+            }).finally(() => {
+                if (pane.taskPollTimer !== null) {
+                    pane.taskPollTimer = window.setTimeout(poll, 1000);
+                }
             });
-        }, 1000);
+        };
+        pane.taskPollTimer = window.setTimeout(poll, 0);
     };
 
     const openTaskData = (task) => {
@@ -844,6 +1166,20 @@
                 }
             },
         );
+        pane.querySelector(".task-chart-range").addEventListener(
+            "change",
+            () => {
+                pane.chartSamples = null;
+                fetchChartData(taskId, pane).catch((error) => {
+                    pane.querySelector(".task-detail-error").textContent = (
+                        error.message
+                    );
+                });
+            },
+        );
+        fetchChartData(taskId, pane).catch((error) => {
+            pane.querySelector(".task-detail-error").textContent = error.message;
+        });
         startPolling(taskId, pane);
     };
 

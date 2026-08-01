@@ -30,7 +30,7 @@ dotenv_value() {
 }
 
 readonly SERVER_HOST="${OIL_SERVER_HOST:-$(dotenv_value OIL_SERVER_HOST 127.0.0.1)}"
-readonly SERVER_PORT="${OIL_SERVER_PORT:-$(dotenv_value OIL_SERVER_PORT 10000)}"
+readonly SERVER_PORT="${OIL_SERVER_PORT:-$(dotenv_value OIL_SERVER_PORT 8000)}"
 
 cd "$APP_DIR"
 

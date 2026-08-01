@@ -1,6 +1,7 @@
 """Unit tests for reusable instrument transports."""
 
-from unittest.mock import MagicMock
+import errno
+from unittest.mock import MagicMock, patch
 
 import serial
 from django.test import SimpleTestCase
@@ -133,6 +134,24 @@ class USBTMCTransportTests(SimpleTestCase):
             "empty response",
         ):
             transport.read()
+
+    @patch("drivers.transports.usbtmc.fcntl.ioctl")
+    def test_read_timeout_is_a_transport_error(self, ioctl):
+        """USBTMC stops waiting when an instrument does not respond."""
+        device = MagicMock(closed=False)
+        device.fileno.return_value = 12
+        device.read.side_effect = OSError(errno.ETIMEDOUT, "timed out")
+        transport = USBTMCTransport("/dev/usbtmc3")
+        transport.device = device
+
+        with self.assertRaisesMessage(
+            CommunicationError,
+            "USBTMC response timed out",
+        ):
+            transport.read(timeout=0.01)
+
+        ioctl.assert_called_once()
+        device.read.assert_called_once_with(400)
 
 
 class MockTransportTests(SimpleTestCase):

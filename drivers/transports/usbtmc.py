@@ -1,11 +1,17 @@
 """Linux USBTMC transport for newline-delimited SCPI instruments."""
 
 from collections.abc import Callable
+import errno
+import fcntl
+import struct
 from typing import BinaryIO
 
 from drivers.exceptions import CommunicationError
 
 from .base import InstrumentTransport
+
+
+USBTMC_IOCTL_SET_TIMEOUT = 0x40045B0A
 
 
 class USBTMCTransport(InstrumentTransport):
@@ -72,8 +78,21 @@ class USBTMCTransport(InstrumentTransport):
         if not self.is_open:
             raise CommunicationError("The USBTMC transport is not open.")
         try:
+            if timeout is not None:
+                timeout_milliseconds = max(1, round(timeout * 1000))
+                fcntl.ioctl(
+                    self.device.fileno(),
+                    USBTMC_IOCTL_SET_TIMEOUT,
+                    struct.pack("I", timeout_milliseconds),
+                )
             response = self.device.read(self.read_size)
+        except CommunicationError:
+            raise
         except OSError as exc:
+            if exc.errno == errno.ETIMEDOUT:
+                raise CommunicationError(
+                    "The USBTMC response timed out.",
+                ) from exc
             raise CommunicationError(
                 f"Could not read from USBTMC device {self.device_path}."
             ) from exc
