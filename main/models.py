@@ -66,6 +66,10 @@ class Instrument(models.Model):
             "Mock RND Lab 320-3005P",
         )
         RND_KA3005P = "rnd_ka3005p", "RND Lab 320-KA3005P"
+        RPI_CPU_TEMPERATURE = (
+            "rpi_cpu_temperature",
+            "Raspberry Pi CPU Temperature",
+        )
 
     class Status(models.TextChoices):
         """Connection states shown in the instrument inventory."""
@@ -84,7 +88,8 @@ class Instrument(models.Model):
         help_text=(
             "Device path such as /dev/ttyUSB0 or /dev/usbtmc0, "
             "mock-dmm://default, mock-psu://default, or "
-            "mock-rnd-psu://default."
+            "mock-rnd-psu://default; thermal path such as "
+            "/sys/class/thermal/thermal_zone0/temp."
         ),
     )
     status = models.CharField(

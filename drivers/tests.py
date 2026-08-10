@@ -20,6 +20,7 @@ from .mock_dc_power_supply import MockDCPowerSupplyDriver
 from .mock_rnd_320_3005p import MockRND3203005PDriver
 from .registry import DriverRegistry
 from .rnd_ka3005p import RNDKA3005PDriver
+from .rpi_cpu_temperature import RaspberryPiCPUTemperatureDriver
 from .transports import InstrumentTransport
 from .transports import MockTransport
 
@@ -603,6 +604,16 @@ class DriverFactoryTests(SimpleTestCase):
         self.assertIsInstance(driver, MockRND3203005PDriver)
         self.assertEqual(driver.address, "mock-rnd-psu://default")
 
+    def test_factory_creates_rpi_cpu_temperature_driver(self):
+        driver = create_driver(
+            SimpleNamespace(
+                driver="rpi_cpu_temperature",
+                address="/sys/class/thermal/thermal_zone0/temp",
+            ),
+        )
+
+        self.assertIsInstance(driver, RaspberryPiCPUTemperatureDriver)
+
 
 class DriverRegistryTests(SimpleTestCase):
     """Verify driver discovery and extension through the central registry."""
@@ -622,6 +633,7 @@ class DriverRegistryTests(SimpleTestCase):
                 "mock_dc_power_supply",
                 "mock_rnd_320_3005p",
                 "rnd_ka3005p",
+                "rpi_cpu_temperature",
             ),
         )
 
@@ -672,6 +684,47 @@ class DriverRegistryTests(SimpleTestCase):
 
         with self.assertRaises(TypeError):
             capabilities["other"] = capability
+
+
+class RaspberryPiCPUTemperatureDriverTests(SimpleTestCase):
+    """Verify Raspberry Pi thermal-zone readings without Pi hardware."""
+
+    @patch("drivers.rpi_cpu_temperature.Path.read_text", return_value="42500\n")
+    def test_reads_millidegrees_as_celsius(self, read_text):
+        driver = RaspberryPiCPUTemperatureDriver()
+
+        with driver:
+            identity = driver.identify()
+            result = driver.measure_temperature()
+
+        self.assertIn("Raspberry Pi,CPU thermal sensor", identity)
+        self.assertEqual(
+            result,
+            MeasurementResult(parameter="Temperature", value=42.5, unit="°C"),
+        )
+        self.assertEqual(read_text.call_count, 2)
+        self.assertFalse(driver.connected)
+
+    @patch(
+        "drivers.rpi_cpu_temperature.Path.read_text",
+        side_effect=OSError("missing"),
+    )
+    def test_connect_reports_missing_thermal_zone(self, _read_text):
+        driver = RaspberryPiCPUTemperatureDriver("/missing/temp")
+
+        with self.assertRaisesMessage(
+            ConnectionError,
+            "Could not read Raspberry Pi temperature sensor",
+        ):
+            driver.connect()
+
+    @patch("drivers.rpi_cpu_temperature.Path.read_text", return_value="invalid")
+    def test_invalid_sensor_value_is_a_measurement_error(self, _read_text):
+        driver = RaspberryPiCPUTemperatureDriver()
+        driver.connected = True
+
+        with self.assertRaises(MeasurementError):
+            driver.measure_temperature()
 
 
 class MockInstrumentDriverTests(SimpleTestCase):

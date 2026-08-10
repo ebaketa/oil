@@ -143,7 +143,10 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
     benches = {}
     for assignment in assignments:
         config = assignment.configuration
-        if config.get("function") == "temperature":
+        if (
+            config.get("function") == "temperature"
+            and assignment.instrument.driver == "mock-dmm"
+        ):
             benches[assignment.pk] = VirtualMockBench(
                 seed=int(config.get("seed", 1)),
                 temperature_min=Decimal(config["minimum"]),
@@ -212,7 +215,7 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
                 config = assignment.configuration
                 if (
                     assignment is supply_assignment
-                    or config.get("function") == "temperature"
+                    or assignment.pk in benches
                     or config.get("source") == "virtual"
                 ):
                     continue
@@ -327,7 +330,7 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
                             continue
                         config = assignment.configuration
                         function = config["function"]
-                        if function == "temperature":
+                        if function == "temperature" and assignment.pk in benches:
                             value = benches[
                                 assignment.pk
                             ].measure_temperature()

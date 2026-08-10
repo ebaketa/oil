@@ -619,7 +619,10 @@
             seed.step = "1";
 
             const updateTemperatureFields = () => {
-                const visible = functionField.value === "temperature";
+                const visible = (
+                    instrument.driver === "mock-dmm"
+                    && functionField.value === "temperature"
+                );
                 [minimum, maximum, resolution, seed].forEach((field) => {
                     field.closest(".col-md-6").classList.toggle(
                         "d-none",

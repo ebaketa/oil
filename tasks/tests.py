@@ -132,7 +132,7 @@ class TaskViewTests(TestCase):
         self.assertContains(response, 'id="saved-task-pane-template"')
         self.assertContains(response, 'id="saved-tasks-tab"')
         self.assertContains(response, 'id="task-status-filter"')
-        self.assertContains(response, "tasks/js/task_tabs.js?v=33")
+        self.assertContains(response, "tasks/js/task_tabs.js?v=34")
         self.assertContains(response, "task-stop-button")
         self.assertContains(response, "task-complete-button")
         self.assertContains(response, "saved-task-elapsed")
@@ -876,6 +876,43 @@ class AutomationRunnerTests(TestCase):
         task.refresh_from_db()
         self.assertEqual(task.status, AutomationTask.Status.COMPLETED)
         self.assertEqual(task.samples.count(), 1)
+
+    @patch("drivers.rpi_cpu_temperature.Path.read_text", return_value="48750\n")
+    def test_runner_reads_raspberry_pi_cpu_temperature(self, _read_text):
+        """A physical temperature capability is read through its driver."""
+        sensor = Instrument.objects.create(
+            name="RPi CPU",
+            manufacturer="Raspberry Pi",
+            model_name="CPU thermal sensor",
+            driver=Instrument.Driver.RPI_CPU_TEMPERATURE,
+            address="/sys/class/thermal/thermal_zone0/temp",
+        )
+        task = AutomationTask.objects.create(
+            user=self.user,
+            name="RPi temperature",
+            measurement_mode=AutomationTask.MeasurementMode.SINGLE,
+            interval_seconds=1,
+        )
+        assignment = TaskInstrument.objects.create(
+            task=task,
+            instrument=sensor,
+            configuration={
+                "function": "temperature",
+                "source": "external",
+            },
+        )
+
+        run_automation_task(task.pk)
+
+        task.refresh_from_db()
+        reading = TaskReading.objects.get(
+            sample__task=task,
+            task_instrument=assignment,
+        )
+        self.assertEqual(task.status, AutomationTask.Status.COMPLETED)
+        self.assertEqual(reading.parameter, "Temperature")
+        self.assertEqual(reading.value, Decimal("48.750"))
+        self.assertEqual(reading.unit, "°C")
 
     def test_continuous_runner_waits_until_stopped(self):
         """Continuous mode keeps measuring until its stop event is set."""

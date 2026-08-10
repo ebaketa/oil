@@ -479,7 +479,10 @@ def task_create(request):
                         "and Keysight 34461A.",
                     )
                 config["display_off"] = display_off
-                if function == "temperature":
+                if (
+                    function == "temperature"
+                    and instrument.driver == Instrument.Driver.MOCK
+                ):
                     minimum = Decimal(str(config.get("minimum")))
                     maximum = Decimal(str(config.get("maximum")))
                     resolution = Decimal(str(config.get("resolution")))
