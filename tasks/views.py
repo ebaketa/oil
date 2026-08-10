@@ -17,6 +17,7 @@ from instruments.models import Instrument
 from measurements.exports import safe_spreadsheet_text
 
 from .forms import TaskBuilderForm
+from .bench import VirtualMockBench
 from .models import AutomationTask, TaskInstrument, TaskSample
 from .runner import TaskRunner
 
@@ -47,6 +48,7 @@ def _serialize_task(task, *, include_samples=False, samples_queryset=None):
             "instrument_id": assignment.instrument_id,
             "name": assignment.instrument.name,
             "driver": assignment.instrument.get_driver_display(),
+            "driver_name": assignment.instrument.driver,
             "configuration": assignment.configuration,
             "voltage_decimals": _voltage_decimal_places(
                 assignment.instrument,
@@ -67,6 +69,7 @@ def _serialize_task(task, *, include_samples=False, samples_queryset=None):
                         "instrument_id": instrument.pk,
                         "name": instrument.name,
                         "driver": instrument.get_driver_display(),
+                        "driver_name": instrument.driver,
                         "configuration": {},
                         "voltage_decimals": _voltage_decimal_places(
                             instrument,
@@ -158,16 +161,33 @@ def _serialize_task(task, *, include_samples=False, samples_queryset=None):
             "readings__task_instrument__instrument",
         )
         for sample in recent_samples:
-            readings = [
-                {
+            readings = []
+            for reading in sample.readings.all():
+                serialized_reading = {
                     "instrument": reading.task_instrument.instrument.name,
                     "assignment_id": reading.task_instrument_id,
                     "parameter": reading.parameter,
                     "value": str(reading.value),
                     "unit": reading.unit,
                 }
-                for reading in sample.readings.all()
-            ]
+                if (
+                    reading.parameter == "Voltage DC"
+                    and reading.task_instrument.instrument.driver
+                    == Instrument.Driver.MOCK
+                    and reading.task_instrument.configuration.get("source")
+                    == AutomationTask.VoltageSource.VIRTUAL
+                ):
+                    decimals = (
+                        VirtualMockBench.voltage_decimal_places(
+                            sample.voltage_setpoint,
+                        )
+                    )
+                    serialized_reading["decimals"] = decimals
+                    serialized_reading["value"] = format(
+                        reading.value,
+                        f".{decimals}f",
+                    )
+                readings.append(serialized_reading)
             if not task_instruments:
                 if task.power_supply:
                     readings.append(
@@ -328,21 +348,78 @@ def task_create(request):
                 mode = config.get("mode")
                 if mode not in AutomationTask.VoltageMode.values:
                     raise ValueError("Select a valid power supply mode.")
-                for name in ("start_voltage", "stop_voltage", "voltage_step"):
-                    value = Decimal(str(config.get(name)))
-                    if name == "voltage_step":
-                        if not limits["step"] <= value <= limits["maximum"]:
-                            raise ValueError(
-                                "Voltage step is outside the driver's range.",
-                            )
-                    elif not limits["minimum"] <= value <= limits["maximum"]:
+                sweep_back = config.get("sweep_back", False)
+                if sweep_back in (True, "true"):
+                    sweep_back = True
+                elif sweep_back in (False, "false"):
+                    sweep_back = False
+                else:
+                    raise ValueError("Select a valid Sweep Back option.")
+                config["sweep_back"] = (
+                    sweep_back if mode == AutomationTask.VoltageMode.SWEEP else False
+                )
+                if mode == AutomationTask.VoltageMode.FIXED:
+                    set_voltage = Decimal(
+                        str(
+                            config.get(
+                                "set_voltage",
+                                config.get("start_voltage"),
+                            ),
+                        ),
+                    )
+                    if not limits["minimum"] <= set_voltage <= limits["maximum"]:
+                        raise ValueError("Voltage is outside the driver's range.")
+                    if set_voltage % limits["step"] != 0:
                         raise ValueError(
-                            "Voltage is outside the driver's range.",
+                            "Voltage does not match the driver's resolution.",
                         )
-                    config[name] = str(value)
-                config["cycle_count"] = int(config.get("cycle_count", 1))
+                    config["set_voltage"] = str(set_voltage)
+                    config["start_voltage"] = str(set_voltage)
+                    config["stop_voltage"] = str(set_voltage)
+                    config["voltage_step"] = str(limits["step"])
+                    config["cycle_count"] = 1
+                else:
+                    for name in ("start_voltage", "stop_voltage", "voltage_step"):
+                        value = Decimal(str(config.get(name)))
+                        if name == "voltage_step":
+                            if not limits["step"] <= value <= limits["maximum"]:
+                                raise ValueError(
+                                    "Voltage step is outside the driver's range.",
+                                )
+                        elif not limits["minimum"] <= value <= limits["maximum"]:
+                            raise ValueError(
+                                "Voltage is outside the driver's range.",
+                            )
+                        config[name] = str(value)
+                    config["cycle_count"] = int(config.get("cycle_count", 1))
                 if not 1 <= config["cycle_count"] <= 100:
                     raise ValueError("Cycle count must be 1–100.")
+                if instrument.driver == Instrument.Driver.MOCK_RND_320_3005P:
+                    tolerance_unit = config.get("output_tolerance_unit", "mV")
+                    if tolerance_unit not in ("uV", "mV", "V"):
+                        raise ValueError("Select a valid output tolerance unit.")
+                    tolerance_value = Decimal(
+                        str(
+                            config.get(
+                                "output_tolerance_value",
+                                config.get("output_tolerance_mv", "0"),
+                            ),
+                        ),
+                    )
+                    tolerance_mv = tolerance_value * {
+                        "uV": Decimal("0.001"),
+                        "mV": Decimal("1"),
+                        "V": Decimal("1000"),
+                    }[tolerance_unit]
+                    if not tolerance_mv.is_finite() or not (
+                        Decimal("0") <= tolerance_mv <= Decimal("30000")
+                    ):
+                        raise ValueError(
+                            "Output tolerance must be between 0 and 30000 mV.",
+                        )
+                    config["output_tolerance_value"] = str(tolerance_value)
+                    config["output_tolerance_unit"] = tolerance_unit
+                    config["output_tolerance_mv"] = str(tolerance_mv)
                 readback_voltage = config.get("readback_voltage", False)
                 if readback_voltage in (True, "true"):
                     readback_voltage = True
@@ -438,13 +515,16 @@ def task_create(request):
         if instrument.driver == Instrument.Driver.MOCK
         and config.get("function") == "dc_voltage"
     )
-    has_mock_supply = any(
-        instrument.driver == Instrument.Driver.MOCK_DC_POWER_SUPPLY
+    has_virtual_supply = any(
+        instrument.driver in (
+            Instrument.Driver.MOCK_DC_POWER_SUPPLY,
+            Instrument.Driver.MOCK_RND_320_3005P,
+        )
         for instrument in power_supplies
     )
-    if has_virtual_meter and not has_mock_supply:
+    if has_virtual_meter and not has_virtual_supply:
         return JsonResponse(
-            {"error": "Virtual voltage measurement requires a Mock PSU."},
+            {"error": "Virtual voltage measurement requires a simulated PSU."},
             status=400,
         )
 

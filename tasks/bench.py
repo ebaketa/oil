@@ -7,6 +7,13 @@ from decimal import Decimal, ROUND_HALF_UP
 class VirtualMockBench:
     """Couple a Mock PSU output to repeatable simulated measurements."""
 
+    VOLTAGE_RANGES = (
+        (Decimal("0.5"), Decimal("0.00001")),
+        (Decimal("5"), Decimal("0.0001")),
+        (Decimal("50"), Decimal("0.001")),
+        (Decimal("500"), Decimal("0.01")),
+    )
+
     def __init__(
         self,
         *,
@@ -21,10 +28,29 @@ class VirtualMockBench:
         self.temperature_resolution = temperature_resolution
 
     def measure_voltage(self, output_voltage: float) -> Decimal:
-        """Return PSU voltage with deterministic ±2 mV meter error."""
-        error_mv = self._random.choice((-2, -1, 0, 0, 0, 1, 2))
-        value = Decimal(str(output_voltage)) + Decimal(error_mv) / 1000
-        return max(Decimal("0"), value).quantize(Decimal("0.0001"))
+        """Measure voltage on the smallest fitting 50,000-count range."""
+        input_value = Decimal(str(output_voltage))
+        resolution = self.voltage_resolution(input_value)
+        error_counts = self._random.choice((-2, -1, 0, 0, 0, 1, 2))
+        value = input_value + Decimal(error_counts) * resolution
+        return max(Decimal("0"), value).quantize(
+            resolution,
+            rounding=ROUND_HALF_UP,
+        )
+
+    @classmethod
+    def voltage_resolution(cls, voltage) -> Decimal:
+        """Return resolution for the smallest range containing the voltage."""
+        magnitude = abs(Decimal(str(voltage)))
+        for full_scale, resolution in cls.VOLTAGE_RANGES:
+            if magnitude <= full_scale:
+                return resolution
+        raise ValueError("Voltage exceeds the simulated 500 V DMM range.")
+
+    @classmethod
+    def voltage_decimal_places(cls, voltage) -> int:
+        """Return display precision selected by voltage autoranging."""
+        return -cls.voltage_resolution(voltage).as_tuple().exponent
 
     def measure_temperature(self) -> Decimal:
         """Return a seeded random temperature within configured bounds."""

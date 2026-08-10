@@ -38,6 +38,8 @@ def voltage_sequence(task: AutomationTask) -> tuple[Decimal, ...]:
         values.append(stop)
 
     if task.voltage_mode == AutomationTask.VoltageMode.SWEEP:
+        if getattr(task, "sweep_back", False):
+            return tuple(values + values[-2::-1])
         return tuple(values)
 
     reverse_values = values[-2::-1]
@@ -133,6 +135,10 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
         task.stop_voltage = Decimal(supply_config["stop_voltage"])
         task.voltage_step = Decimal(supply_config["voltage_step"])
         task.cycle_count = int(supply_config.get("cycle_count", 1))
+        task.sweep_back = supply_config.get("sweep_back", False) in (
+            True,
+            "true",
+        )
 
     benches = {}
     for assignment in assignments:
@@ -189,6 +195,17 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
                 else task.power_supply_id
             )
             supply = drivers.get(supply_id)
+            if (
+                supply is not None
+                and supply_assignment is not None
+                and hasattr(supply, "set_output_tolerance_mv")
+            ):
+                supply.set_output_tolerance_mv(
+                    supply_assignment.configuration.get(
+                        "output_tolerance_mv",
+                        "0",
+                    ),
+                )
 
             physical_groups = {}
             for assignment in assignments:
@@ -322,8 +339,13 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
                             function == "dc_voltage"
                             and config.get("source") == "virtual"
                         ):
+                            measure_virtual_voltage = getattr(
+                                supply,
+                                "measure_actual_output_voltage",
+                                supply.measure_output_voltage,
+                            )
                             value = legacy_bench.measure_voltage(
-                                supply.measure_output_voltage(),
+                                measure_virtual_voltage(),
                             )
                             parameter = "Voltage DC"
                             unit = "V"

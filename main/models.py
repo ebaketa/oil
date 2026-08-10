@@ -61,6 +61,10 @@ class Instrument(models.Model):
             "mock_dc_power_supply",
             "Mock DC Power Supply",
         )
+        MOCK_RND_320_3005P = (
+            "mock_rnd_320_3005p",
+            "Mock RND Lab 320-3005P",
+        )
         RND_KA3005P = "rnd_ka3005p", "RND Lab 320-KA3005P"
 
     class Status(models.TextChoices):
@@ -79,7 +83,8 @@ class Instrument(models.Model):
         max_length=255,
         help_text=(
             "Device path such as /dev/ttyUSB0 or /dev/usbtmc0, "
-            "mock-dmm://default, or mock-psu://default."
+            "mock-dmm://default, mock-psu://default, or "
+            "mock-rnd-psu://default."
         ),
     )
     status = models.CharField(

@@ -26,6 +26,7 @@ class MockInstrumentDriver(BaseInstrumentDriver):
             label="DC voltage",
             unit="V",
             autorange=True,
+            ranges=(0.5, 5.0, 50.0, 500.0),
         ),
         "ac_voltage": MeasurementCapability(
             label="AC voltage",

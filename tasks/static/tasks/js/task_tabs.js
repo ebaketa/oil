@@ -143,7 +143,7 @@
 
         window.requestAnimationFrame(() => {
             const width = Math.max(320, canvas.clientWidth);
-            const height = 320;
+            const height = 160;
             const ratio = window.devicePixelRatio || 1;
             canvas.width = Math.round(width * ratio);
             canvas.height = Math.round(height * ratio);
@@ -151,7 +151,7 @@
             context.setTransform(ratio, 0, 0, ratio, 0, 0);
             context.clearRect(0, 0, width, height);
 
-            const plot = {left: 72, right: width - 18, top: 18, bottom: 278};
+            const plot = {left: 72, right: width - 18, top: 12, bottom: 118};
             let minimum = Math.min(...values);
             let maximum = Math.max(...values);
             const span = maximum - minimum;
@@ -218,12 +218,12 @@
             context.fillStyle = foreground;
             context.textBaseline = "top";
             context.textAlign = "left";
-            context.fillText(formatChartTime(samples[0].timestamp), plot.left, 288);
+            context.fillText(formatChartTime(samples[0].timestamp), plot.left, 128);
             context.textAlign = "right";
             context.fillText(
                 formatChartTime(samples[samples.length - 1].timestamp),
                 plot.right,
-                288,
+                128,
             );
 
             const baseImage = context.getImageData(
@@ -259,7 +259,9 @@
                         samples[sampleIndex],
                         dataset.column,
                     );
-                    const decimals = dataset.column.decimals;
+                    const decimals = Number.isInteger(reading?.decimals)
+                        ? reading.decimals
+                        : dataset.column.decimals;
                     const formattedValue = Number.isInteger(decimals)
                         ? value.toFixed(decimals)
                         : String(value);
@@ -429,11 +431,27 @@
 
         if (instrument.is_power_supply) {
             const limits = instrument.voltage_limits;
-            addField(fields, "Mode", "mode", "sweep", [
+            const mode = addField(fields, "Mode", "mode", "sweep", [
                 ["fixed", "Fixed"],
                 ["sweep", "Sweep"],
                 ["cycle", "Cycle"],
             ]);
+            const sweepBack = addField(
+                fields,
+                "Sweep Back",
+                "sweep_back",
+                "false",
+                [
+                    ["false", "No"],
+                    ["true", "Yes"],
+                ],
+            );
+            const fixedVoltage = addField(
+                fields,
+                "Set voltage (V)",
+                "set_voltage",
+                limits.minimum,
+            );
             const start = addField(
                 fields,
                 "Start voltage (V)",
@@ -453,6 +471,9 @@
                 limits.step,
             );
             [start, stop, step].forEach((field) => {
+                field.parentElement.className = "col-md-4";
+            });
+            [fixedVoltage, start, stop, step].forEach((field) => {
                 field.min = limits.minimum;
                 field.max = limits.maximum;
                 field.step = limits.step;
@@ -466,7 +487,64 @@
             cycles.step = "1";
             cycles.min = "1";
             cycles.max = "100";
-            addField(
+            const updateVoltageModeFields = () => {
+                const fixed = mode.value === "fixed";
+                const cycle = mode.value === "cycle";
+                fixedVoltage.parentElement.classList.toggle(
+                    "d-none",
+                    !fixed,
+                );
+                [start, stop, step].forEach((field) => {
+                    field.parentElement.classList.toggle(
+                        "d-none",
+                        fixed,
+                    );
+                });
+                cycles.parentElement.classList.toggle(
+                    "d-none",
+                    !cycle,
+                );
+                sweepBack.parentElement.classList.toggle(
+                    "d-none",
+                    mode.value !== "sweep",
+                );
+            };
+            mode.addEventListener("change", updateVoltageModeFields);
+            updateVoltageModeFields();
+            if (instrument.driver === "mock_rnd_320_3005p") {
+                const tolerance = addField(
+                    fields,
+                    "Output tolerance (±)",
+                    "output_tolerance_value",
+                    "0",
+                );
+                tolerance.parentElement.className = "col-md-4";
+                tolerance.min = "0";
+                const toleranceUnit = addField(
+                    fields,
+                    "Tolerance unit",
+                    "output_tolerance_unit",
+                    "mV",
+                    [
+                        ["uV", "µV"],
+                        ["mV", "mV"],
+                        ["V", "V"],
+                    ],
+                );
+                toleranceUnit.parentElement.className = "col-md-4";
+                const updateToleranceUnit = () => {
+                    const settings = {
+                        uV: {max: "30000000", step: "1"},
+                        mV: {max: "30000", step: "0.001"},
+                        V: {max: "30", step: "0.000001"},
+                    }[toleranceUnit.value];
+                    tolerance.max = settings.max;
+                    tolerance.step = settings.step;
+                };
+                toleranceUnit.addEventListener("change", updateToleranceUnit);
+                updateToleranceUnit();
+            }
+            const readback = addField(
                 fields,
                 "Output voltage readback",
                 "readback_voltage",
@@ -476,6 +554,9 @@
                     ["true", "Yes — read after each trigger"],
                 ],
             );
+            if (instrument.driver === "mock_rnd_320_3005p") {
+                readback.parentElement.className = "col-md-4";
+            }
             return;
         }
 
@@ -982,8 +1063,11 @@
                         ),
                     );
                     if (reading) {
-                        const value = Number.isInteger(column.decimals)
-                            ? Number(reading.value).toFixed(column.decimals)
+                        const decimals = Number.isInteger(reading.decimals)
+                            ? reading.decimals
+                            : column.decimals;
+                        const value = Number.isInteger(decimals)
+                            ? Number(reading.value).toFixed(decimals)
                             : reading.value;
                         cell.textContent = `${value} ${reading.unit}`;
                         cell.title = reading.parameter;

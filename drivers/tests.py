@@ -17,6 +17,7 @@ from .factory import create_driver
 from .keysight_34461a import Keysight34461ADriver
 from .mock import MockInstrumentDriver
 from .mock_dc_power_supply import MockDCPowerSupplyDriver
+from .mock_rnd_320_3005p import MockRND3203005PDriver
 from .registry import DriverRegistry
 from .rnd_ka3005p import RNDKA3005PDriver
 from .transports import InstrumentTransport
@@ -590,6 +591,18 @@ class DriverFactoryTests(SimpleTestCase):
         self.assertIsInstance(driver, RNDKA3005PDriver)
         self.assertEqual(driver.port, "/dev/ttyACM0")
 
+    def test_factory_creates_mock_rnd_320_3005p_power_supply(self):
+        """Mock RND inventory uses the dedicated in-memory simulator."""
+        driver = create_driver(
+            SimpleNamespace(
+                driver="mock_rnd_320_3005p",
+                address="mock-rnd-psu://default",
+            ),
+        )
+
+        self.assertIsInstance(driver, MockRND3203005PDriver)
+        self.assertEqual(driver.address, "mock-rnd-psu://default")
+
 
 class DriverRegistryTests(SimpleTestCase):
     """Verify driver discovery and extension through the central registry."""
@@ -607,6 +620,7 @@ class DriverRegistryTests(SimpleTestCase):
                 "keysight_34461a",
                 "mock-dmm",
                 "mock_dc_power_supply",
+                "mock_rnd_320_3005p",
                 "rnd_ka3005p",
             ),
         )
@@ -768,6 +782,105 @@ class RNDKA3005PDriverTests(SimpleTestCase):
             response_termination=None,
         )
         self.assertTrue(driver.connected)
+
+
+class MockRND3203005PDriverTests(SimpleTestCase):
+    """Verify the RND simulator matches the physical driver's public API."""
+
+    def test_identifies_with_no_serial_hardware(self):
+        driver = MockRND3203005PDriver()
+
+        with driver:
+            identity = driver.identify()
+
+        self.assertEqual(identity, driver.IDENTITY)
+        self.assertEqual(driver.command_history, ("*IDN?",))
+
+    def test_programs_voltage_current_and_output(self):
+        driver = MockRND3203005PDriver()
+
+        with driver:
+            self.assertEqual(driver.set_voltage("12.34"), 12.34)
+            self.assertEqual(driver.set_current("1.234"), 1.234)
+            self.assertEqual(driver.measure_output_voltage(), 0.0)
+            driver.enable_output()
+            self.assertEqual(driver.measure_output_voltage(), 12.34)
+            self.assertEqual(driver.measure_output_current(), 0.0)
+            driver.disable_output()
+
+        self.assertEqual(
+            driver.command_history,
+            (
+                "VSET1:12.34",
+                "ISET1:1.234",
+                "VOUT1?",
+                "OUT1",
+                "VOUT1?",
+                "IOUT1?",
+                "OUT0",
+            ),
+        )
+
+    def test_uses_physical_supply_limits_and_resolution(self):
+        driver = MockRND3203005PDriver()
+
+        with driver:
+            self.assertEqual(driver.set_voltage("30.00"), 30.0)
+            self.assertEqual(driver.set_current("5.000"), 5.0)
+            with self.assertRaises(ConfigurationError):
+                driver.set_voltage("30.01")
+            with self.assertRaises(ConfigurationError):
+                driver.set_current("5.001")
+
+    def test_disconnect_disables_output_but_preserves_setpoints(self):
+        driver = MockRND3203005PDriver()
+
+        with driver:
+            driver.set_voltage("5.00")
+            driver.set_current("0.500")
+            driver.enable_output()
+
+        self.assertFalse(driver.output_enabled)
+        self.assertEqual(driver.voltage_setpoint, 5.0)
+        self.assertEqual(driver.current_setpoint, 0.5)
+
+    def test_configurable_output_tolerance_changes_actual_readback(self):
+        driver = MockRND3203005PDriver()
+
+        with driver:
+            self.assertEqual(driver.set_output_tolerance_mv("1"), 1.0)
+            driver.enable_output()
+            driver.set_voltage("5.00")
+            first = driver.measure_output_voltage()
+            first_actual = driver.measure_actual_output_voltage()
+            driver.set_voltage("5.00")
+            second = driver.measure_output_voltage()
+            second_actual = driver.measure_actual_output_voltage()
+            driver.set_voltage("5.00")
+            third = driver.measure_output_voltage()
+            third_actual = driver.measure_actual_output_voltage()
+
+        self.assertEqual((first, second, third), (5.0, 5.0, 5.0))
+        self.assertEqual(
+            (first_actual, second_actual, third_actual),
+            (4.999, 4.9995, 5.0),
+        )
+
+    def test_rejects_invalid_output_tolerance(self):
+        driver = MockRND3203005PDriver()
+
+        for tolerance in ("-0.001", "30000.001", "invalid"):
+            with self.subTest(tolerance=tolerance):
+                with self.assertRaises(ConfigurationError):
+                    driver.set_output_tolerance_mv(tolerance)
+
+    def test_connection_error_profile_is_deterministic(self):
+        driver = MockRND3203005PDriver(
+            "mock-rnd-psu://connection-error",
+        )
+
+        with self.assertRaises(ConnectionError):
+            driver.connect()
 
 
 class MockDCPowerSupplyDriverTests(SimpleTestCase):

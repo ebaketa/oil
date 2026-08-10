@@ -15,6 +15,7 @@ from main.models import Instrument
 from drivers.base import MeasurementResult
 from drivers.exceptions import MeasurementError
 
+from .bench import VirtualMockBench
 from .models import (
     AutomationTask,
     TaskInstrument,
@@ -22,6 +23,47 @@ from .models import (
     TaskSample,
 )
 from .runner import measurement_sequence, run_automation_task, voltage_sequence
+
+
+class VirtualMockBenchTests(TestCase):
+    """Verify 50,000-count voltage autoranging and resolution."""
+
+    def create_bench(self):
+        return VirtualMockBench(
+            seed=1,
+            temperature_min=Decimal("20"),
+            temperature_max=Decimal("21"),
+            temperature_resolution=Decimal("0.1"),
+        )
+
+    def test_voltage_ranges_select_expected_resolution(self):
+        self.assertEqual(
+            [
+                self.create_bench().voltage_resolution(value)
+                for value in ("0.499", "4.99", "49.9", "499")
+            ],
+            [
+                Decimal("0.00001"),
+                Decimal("0.0001"),
+                Decimal("0.001"),
+                Decimal("0.01"),
+            ],
+        )
+
+    def test_voltage_measurement_error_is_at_most_two_counts(self):
+        for voltage in ("0.499", "4.99", "30"):
+            with self.subTest(voltage=voltage):
+                bench = self.create_bench()
+                resolution = bench.voltage_resolution(voltage)
+                reading = bench.measure_voltage(float(voltage))
+                self.assertLessEqual(
+                    abs(reading - Decimal(voltage)),
+                    resolution * 2,
+                )
+
+    def test_voltage_above_highest_range_is_rejected(self):
+        with self.assertRaisesMessage(ValueError, "exceeds"):
+            self.create_bench().measure_voltage(500.01)
 
 
 class TaskViewTests(TestCase):
@@ -90,7 +132,7 @@ class TaskViewTests(TestCase):
         self.assertContains(response, 'id="saved-task-pane-template"')
         self.assertContains(response, 'id="saved-tasks-tab"')
         self.assertContains(response, 'id="task-status-filter"')
-        self.assertContains(response, "tasks/js/task_tabs.js?v=30")
+        self.assertContains(response, "tasks/js/task_tabs.js?v=33")
         self.assertContains(response, "task-stop-button")
         self.assertContains(response, "task-complete-button")
         self.assertContains(response, "saved-task-elapsed")
@@ -291,6 +333,116 @@ class TaskViewTests(TestCase):
             {"hours": 0, "minutes": 0, "seconds": 5, "hundredths": 25},
         )
         start.assert_called_once_with(task.pk)
+
+    @patch("tasks.views.TaskRunner.start")
+    def test_create_accepts_mock_rnd_as_virtual_dmm_source(self, start):
+        """Mock DMM can read voltage from the RND supply simulator."""
+        mock_rnd = Instrument.objects.create(
+            name="Task RND simulator",
+            manufacturer="RND Lab",
+            model_name="320-3005P",
+            driver=Instrument.Driver.MOCK_RND_320_3005P,
+            address="mock-rnd-psu://default",
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("task_create"),
+            {
+                "name": "RND virtual sweep",
+                "measurement_mode": "loop",
+                "trigger_hours": "0",
+                "trigger_minutes": "0",
+                "trigger_seconds": "1",
+                "trigger_hundredths": "0",
+                "requested_samples": "3",
+                "instruments": json.dumps(
+                    [
+                        {
+                            "instrument_id": mock_rnd.pk,
+                            "configuration": {
+                                "mode": "sweep",
+                                "start_voltage": "0.00",
+                                "stop_voltage": "2.00",
+                                "voltage_step": "1.00",
+                                "cycle_count": "1",
+                                "sweep_back": "true",
+                                "readback_voltage": True,
+                                "output_tolerance_value": "100",
+                                "output_tolerance_unit": "uV",
+                            },
+                        },
+                        {
+                            "instrument_id": self.instrument.pk,
+                            "configuration": {
+                                "function": "dc_voltage",
+                                "source": "virtual",
+                            },
+                        },
+                    ],
+                ),
+            },
+        )
+
+        self.assertEqual(response.status_code, 201, response.content)
+        assignment = TaskInstrument.objects.get(instrument=mock_rnd)
+        self.assertEqual(
+            assignment.configuration["output_tolerance_mv"],
+            "0.100",
+        )
+        self.assertEqual(
+            assignment.configuration["output_tolerance_value"],
+            "100",
+        )
+        self.assertEqual(assignment.configuration["output_tolerance_unit"], "uV")
+        self.assertTrue(assignment.configuration["sweep_back"])
+        start.assert_called_once()
+
+    @patch("tasks.views.TaskRunner.start")
+    def test_fixed_supply_accepts_only_set_voltage(self, start):
+        """Fixed mode normalizes one setpoint without sweep fields."""
+        mock_rnd = Instrument.objects.create(
+            name="Fixed RND simulator",
+            manufacturer="RND Lab",
+            model_name="320-3005P",
+            driver=Instrument.Driver.MOCK_RND_320_3005P,
+            address="mock-rnd-psu://fixed",
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("task_create"),
+            {
+                "name": "Continuous fixed output",
+                "measurement_mode": "continuous",
+                "trigger_hours": "0",
+                "trigger_minutes": "0",
+                "trigger_seconds": "1",
+                "trigger_hundredths": "0",
+                "requested_samples": "2",
+                "instruments": json.dumps(
+                    [
+                        {
+                            "instrument_id": mock_rnd.pk,
+                            "configuration": {
+                                "mode": "fixed",
+                                "set_voltage": "4.99",
+                                "output_tolerance_mv": "1",
+                                "readback_voltage": True,
+                            },
+                        },
+                    ],
+                ),
+            },
+        )
+
+        self.assertEqual(response.status_code, 201, response.content)
+        config = TaskInstrument.objects.get(instrument=mock_rnd).configuration
+        self.assertEqual(config["set_voltage"], "4.99")
+        self.assertEqual(config["start_voltage"], "4.99")
+        self.assertEqual(config["stop_voltage"], "4.99")
+        self.assertEqual(config["voltage_step"], "0.01")
+        start.assert_called_once()
 
     def test_task_detail_does_not_expose_another_users_task(self):
         """Task details are private to their owner."""
@@ -639,6 +791,18 @@ class AutomationRunnerTests(TestCase):
             (Decimal("0.000"), Decimal("1.000"), Decimal("2.000")),
         )
 
+        task.sweep_back = True
+        self.assertEqual(
+            voltage_sequence(task),
+            (
+                Decimal("0.000"),
+                Decimal("1.000"),
+                Decimal("2.000"),
+                Decimal("1.000"),
+                Decimal("0.000"),
+            ),
+        )
+
         task.voltage_mode = AutomationTask.VoltageMode.CYCLE
         task.cycle_count = 2
         self.assertEqual(
@@ -788,6 +952,72 @@ class AutomationRunnerTests(TestCase):
             parameter="Voltage DC",
         )
         self.assertEqual(voltage_readings.count(), 3)
+
+    @patch("threading.Event.wait", return_value=False)
+    def test_mock_dmm_reads_mock_rnd_virtual_voltage(self, _wait):
+        """RND simulator readback drives virtual Mock DMM measurements."""
+        mock_rnd = Instrument.objects.create(
+            name="Runner RND simulator",
+            manufacturer="RND Lab",
+            model_name="320-3005P",
+            driver=Instrument.Driver.MOCK_RND_320_3005P,
+            address="mock-rnd-psu://default",
+        )
+        task = AutomationTask.objects.create(
+            user=self.user,
+            name="RND virtual sweep",
+            measurement_mode=AutomationTask.MeasurementMode.LOOP,
+            interval_seconds=0.1,
+            requested_samples=3,
+        )
+        TaskInstrument.objects.create(
+            task=task,
+            instrument=mock_rnd,
+            order=0,
+            configuration={
+                "mode": "sweep",
+                "start_voltage": "0.00",
+                "stop_voltage": "2.00",
+                "voltage_step": "1.00",
+                "cycle_count": 1,
+                "readback_voltage": True,
+                "output_tolerance_mv": "1",
+            },
+        )
+        TaskInstrument.objects.create(
+            task=task,
+            instrument=self.meter,
+            order=1,
+            configuration={"function": "dc_voltage", "source": "virtual"},
+        )
+
+        run_automation_task(task.pk)
+
+        task.refresh_from_db()
+        readings = list(
+            TaskReading.objects.filter(
+                sample__task=task,
+                parameter="Voltage DC",
+            ).values_list("value", flat=True),
+        )
+        self.assertEqual(task.status, AutomationTask.Status.COMPLETED)
+        output_readings = list(
+            TaskReading.objects.filter(
+                sample__task=task,
+                parameter="Output voltage readback",
+            ).values_list("value", flat=True),
+        )
+        self.assertEqual(
+            output_readings,
+            [Decimal("0"), Decimal("1"), Decimal("2")],
+        )
+        self.assertEqual(len(readings), 3)
+        for reading, setpoint in zip(
+            readings,
+            (Decimal("0"), Decimal("1"), Decimal("2")),
+            strict=True,
+        ):
+            self.assertLessEqual(abs(reading - setpoint), Decimal("0.002"))
 
     def test_different_physical_instruments_are_read_in_parallel(self):
         """Separate DMM connections begin acquisition concurrently."""
