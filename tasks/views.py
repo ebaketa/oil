@@ -187,6 +187,16 @@ def _serialize_task(task, *, include_samples=False, samples_queryset=None):
                         reading.value,
                         f".{decimals}f",
                     )
+                if (
+                    reading.parameter == "Temperature"
+                    and reading.task_instrument.instrument.driver
+                    == Instrument.Driver.RPI_CPU_TEMPERATURE
+                ):
+                    serialized_reading["decimals"] = 2
+                    serialized_reading["value"] = format(
+                        reading.value,
+                        ".2f",
+                    )
                 readings.append(serialized_reading)
             if not task_instruments:
                 if task.power_supply:

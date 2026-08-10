@@ -1,6 +1,6 @@
 """Driver for the Raspberry Pi Linux thermal-zone CPU sensor."""
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 
 from .base import BaseInstrumentDriver, MeasurementCapability, MeasurementResult
@@ -90,4 +90,4 @@ class RaspberryPiCPUTemperatureDriver(BaseInstrumentDriver):
             raise MeasurementError(
                 f"Invalid Raspberry Pi CPU temperature: {raw!r}.",
             )
-        return value
+        return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)

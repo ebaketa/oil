@@ -689,7 +689,7 @@ class DriverRegistryTests(SimpleTestCase):
 class RaspberryPiCPUTemperatureDriverTests(SimpleTestCase):
     """Verify Raspberry Pi thermal-zone readings without Pi hardware."""
 
-    @patch("drivers.rpi_cpu_temperature.Path.read_text", return_value="42500\n")
+    @patch("drivers.rpi_cpu_temperature.Path.read_text", return_value="42506\n")
     def test_reads_millidegrees_as_celsius(self, read_text):
         driver = RaspberryPiCPUTemperatureDriver()
 
@@ -700,7 +700,7 @@ class RaspberryPiCPUTemperatureDriverTests(SimpleTestCase):
         self.assertIn("Raspberry Pi,CPU thermal sensor", identity)
         self.assertEqual(
             result,
-            MeasurementResult(parameter="Temperature", value=42.5, unit="°C"),
+            MeasurementResult(parameter="Temperature", value=42.51, unit="°C"),
         )
         self.assertEqual(read_text.call_count, 2)
         self.assertFalse(driver.connected)
