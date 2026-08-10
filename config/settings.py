@@ -111,6 +111,19 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+        'OPTIONS': {
+            # Tasks write samples in a background thread while the UI polls
+            # them from request threads. WAL lets those reads proceed during
+            # writes, while the longer timeout avoids transient lock errors on
+            # slower storage such as a Raspberry Pi SD card.
+            'timeout': 20,
+            'transaction_mode': 'IMMEDIATE',
+            'init_command': (
+                'PRAGMA journal_mode=WAL; '
+                'PRAGMA synchronous=NORMAL; '
+                'PRAGMA busy_timeout=20000;'
+            ),
+        },
     }
 }
 
