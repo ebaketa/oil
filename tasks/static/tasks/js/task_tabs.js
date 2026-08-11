@@ -311,7 +311,6 @@
                 const bounds = canvas.getBoundingClientRect();
                 const pointerX = event.clientX - bounds.left;
                 if (pointerX < plot.left || pointerX > plot.right) {
-                    restoreChart();
                     return;
                 }
                 const fraction = (pointerX - plot.left) / (
@@ -320,9 +319,23 @@
                 const sampleIndex = samples.length === 1
                     ? 0
                     : Math.round(fraction * (samples.length - 1));
+                pane.chartHoveredSampleId = samples[sampleIndex].index;
                 highlightSample(sampleIndex);
             };
-            canvas.onmouseleave = restoreChart;
+            canvas.onmouseleave = () => {
+                pane.chartHoveredSampleId = null;
+                restoreChart();
+            };
+
+            if (pane.chartHoveredSampleId !== null
+                && pane.chartHoveredSampleId !== undefined) {
+                const hoveredIndex = samples.findIndex(
+                    (sample) => sample.index === pane.chartHoveredSampleId,
+                );
+                if (hoveredIndex >= 0) {
+                    highlightSample(hoveredIndex);
+                }
+            }
         });
     };
 
@@ -1007,7 +1020,8 @@
                 const stride = Math.ceil(mergedSamples.length / 1000);
                 mergedSamples = mergedSamples.filter(
                     (_sample, index) => index % stride === 0
-                        || index === mergedSamples.length - 1,
+                        || index === mergedSamples.length - 1
+                        || _sample.index === pane.chartHoveredSampleId,
                 );
             }
             pane.chartSamples = mergedSamples;
