@@ -1,7 +1,7 @@
 """Tests for the Task application."""
 
 import json
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from threading import Barrier, Event
 from unittest.mock import patch
@@ -691,6 +691,8 @@ class TaskViewTests(TestCase):
             task=task,
             index=1,
             voltage_setpoint=5,
+            acquisition_time_seconds="0.174",
+            timestamp=datetime(2026, 8, 11, 12, 32, 5, 174000, tzinfo=UTC),
         )
         TaskReading.objects.create(
             sample=sample,
@@ -714,11 +716,90 @@ class TaskViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
         self.assertIn(
-            "Time,Task PSU — Set voltage,Task PSU — Read voltage",
+            "ID;Time;Acquisition Time (s);"
+            "Task PSU — Set voltage (V);Task PSU — Read voltage (V)",
             content,
         )
-        self.assertIn(",5.000 V", content)
-        self.assertIn(",4.980 V", content)
+        self.assertIn(
+            "1;2026-08-11T14:32:05.174+02:00;0,174;5,000;4,980",
+            content,
+        )
+
+    def test_csv_uses_european_format_for_complete_instrument_row(self):
+        """CSV exports one unit-labelled numeric row per trigger."""
+        mock_rnd = Instrument.objects.create(
+            name="Mock RND",
+            manufacturer="RND Lab",
+            model_name="320-3005P",
+            driver=Instrument.Driver.MOCK_RND_320_3005P,
+            address="mock-rnd-psu://csv",
+        )
+        rpi_sensor = Instrument.objects.create(
+            name="RPi CPU Temperature",
+            manufacturer="Raspberry Pi",
+            model_name="CPU thermal sensor",
+            driver=Instrument.Driver.RPI_CPU_TEMPERATURE,
+            address="/sys/class/thermal/thermal_zone0/temp",
+        )
+        task = AutomationTask.objects.create(
+            user=self.user,
+            name="European CSV",
+            status=AutomationTask.Status.COMPLETED,
+        )
+        rnd_assignment = TaskInstrument.objects.create(
+            task=task,
+            instrument=mock_rnd,
+            order=0,
+            configuration={"mode": "fixed", "readback_voltage": True},
+        )
+        dmm_assignment = TaskInstrument.objects.create(
+            task=task,
+            instrument=self.instrument,
+            order=1,
+            configuration={"function": "dc_voltage", "source": "virtual"},
+        )
+        temperature_assignment = TaskInstrument.objects.create(
+            task=task,
+            instrument=rpi_sensor,
+            order=2,
+            configuration={"function": "temperature", "source": "external"},
+        )
+        sample = TaskSample.objects.create(
+            task=task,
+            index=125,
+            voltage_setpoint=5,
+            acquisition_time_seconds="0.174",
+            timestamp=datetime(2026, 8, 11, 12, 32, 5, 174000, tzinfo=UTC),
+        )
+        for assignment, parameter, value, unit in (
+            (rnd_assignment, "Voltage setpoint", "5.00", "V"),
+            (rnd_assignment, "Output voltage readback", "5.00", "V"),
+            (dmm_assignment, "Voltage DC", "4.9999", "V"),
+            (temperature_assignment, "Temperature", "48.75", "°C"),
+        ):
+            TaskReading.objects.create(
+                sample=sample,
+                task_instrument=assignment,
+                parameter=parameter,
+                value=value,
+                unit=unit,
+            )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("task_export_csv", args=[task.pk]))
+        content = b"".join(response.streaming_content).decode("utf-8-sig")
+
+        self.assertIn(
+            "ID;Time;Acquisition Time (s);Mock RND — Set voltage (V);"
+            "Mock RND — Read voltage (V);Task Mock (V);"
+            "RPi CPU Temperature (°C)",
+            content,
+        )
+        self.assertIn(
+            "125;2026-08-11T14:32:05.174+02:00;0,174;"
+            "5,00;5,00;4,9999;48,75",
+            content,
+        )
 
     def test_user_cannot_export_another_users_task(self):
         """Direct CSV URLs do not expose another owner's task."""

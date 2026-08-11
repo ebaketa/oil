@@ -5,6 +5,7 @@ import json
 import csv
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
+from zoneinfo import ZoneInfo
 
 from django.db import transaction
 from django.db.models import Count, Max, Min, Q
@@ -725,7 +726,7 @@ def task_delete(request, pk):
 @login_required
 @require_GET
 def task_export_csv(request, pk):
-    """Export one owned task as a pivoted instrument-results CSV."""
+    """Export one owned task as a European-format pivoted results CSV."""
     try:
         task = (
             AutomationTask.objects.prefetch_related(
@@ -743,49 +744,91 @@ def task_export_csv(request, pk):
         if assignment.configuration.get("readback_voltage", False):
             columns.extend(
                 (
-                    (
-                        assignment.pk,
-                        "Voltage setpoint",
-                        f"{assignment.instrument.name} — Set voltage",
-                        _voltage_decimal_places(assignment.instrument),
-                    ),
-                    (
-                        assignment.pk,
-                        "Output voltage readback",
-                        f"{assignment.instrument.name} — Read voltage",
-                        _voltage_decimal_places(assignment.instrument),
-                    ),
+                    {
+                        "key": assignment.pk,
+                        "parameter": "Voltage setpoint",
+                        "label": f"{assignment.instrument.name} — Set voltage",
+                        "unit": "V",
+                        "decimals": _voltage_decimal_places(
+                            assignment.instrument,
+                        ),
+                        "assignment": assignment,
+                    },
+                    {
+                        "key": assignment.pk,
+                        "parameter": "Output voltage readback",
+                        "label": f"{assignment.instrument.name} — Read voltage",
+                        "unit": "V",
+                        "decimals": _voltage_decimal_places(
+                            assignment.instrument,
+                        ),
+                        "assignment": assignment,
+                    },
                 ),
             )
         else:
+            function = assignment.configuration.get("function")
+            capability = assignment.instrument.capabilities.get(function)
             columns.append(
-                (
-                    assignment.pk,
-                    None,
-                    assignment.instrument.name,
-                    _voltage_decimal_places(assignment.instrument),
-                ),
+                {
+                    "key": assignment.pk,
+                    "parameter": None,
+                    "label": assignment.instrument.name,
+                    "unit": capability.unit if capability else "",
+                    "decimals": (
+                        2
+                        if assignment.instrument.driver
+                        == Instrument.Driver.RPI_CPU_TEMPERATURE
+                        else _voltage_decimal_places(assignment.instrument)
+                    ),
+                    "assignment": assignment,
+                },
             )
     if not columns:
         columns = [
-            (key, None, instrument.name, None)
-            for key, instrument in (
-                ("legacy-psu", task.power_supply),
-                ("legacy-voltage", task.voltage_meter),
-                ("legacy-temperature", task.temperature_meter),
+            {
+                "key": key,
+                "parameter": None,
+                "label": instrument.name,
+                "unit": unit,
+                "decimals": decimals,
+                "assignment": None,
+            }
+            for key, instrument, unit, decimals in (
+                ("legacy-psu", task.power_supply, "V", 3),
+                ("legacy-voltage", task.voltage_meter, "V", 4),
+                ("legacy-temperature", task.temperature_meter, "°C", 2),
             )
             if instrument is not None
         ]
-    writer = csv.writer(CsvEcho(), lineterminator="\r\n")
+    writer = csv.writer(CsvEcho(), delimiter=";", lineterminator="\r\n")
+    export_timezone = ZoneInfo("Europe/Berlin")
+
+    def format_number(value, decimals):
+        """Format one numeric CSV cell with a European decimal comma."""
+        if value is None:
+            return ""
+        formatted = (
+            f"{value:.{decimals}f}"
+            if decimals is not None
+            else format(value, "f")
+        )
+        return formatted.replace(".", ",")
 
     def rows():
         yield "\ufeff"
         yield writer.writerow(
             (
+                "ID",
                 "Time",
+                "Acquisition Time (s)",
                 *(
-                    safe_spreadsheet_text(instrument_name)
-                    for _key, _parameter, instrument_name, _decimals in columns
+                    safe_spreadsheet_text(
+                        f'{column["label"]} ({column["unit"]})'
+                        if column["unit"]
+                        else column["label"]
+                    )
+                    for column in columns
                 ),
             ),
         )
@@ -795,46 +838,57 @@ def task_export_csv(request, pk):
             sample_readings = list(sample.readings.all())
             if not assignments:
                 legacy_values = {
-                    "legacy-psu": (
-                        f"{sample.voltage_setpoint} V"
-                        if task.power_supply
-                        else ""
-                    ),
-                    "legacy-voltage": (
-                        f"{sample.measured_voltage} V"
-                        if sample.measured_voltage is not None
-                        else ""
-                    ),
-                    "legacy-temperature": (
-                        f"{sample.temperature} °C"
-                        if sample.temperature is not None
-                        else ""
-                    ),
+                    "legacy-psu": sample.voltage_setpoint,
+                    "legacy-voltage": sample.measured_voltage,
+                    "legacy-temperature": sample.temperature,
                 }
+            exported_values = []
+            for column in columns:
+                reading = next(
+                    (
+                        candidate
+                        for candidate in sample_readings
+                        if candidate.task_instrument_id == column["key"]
+                        and (
+                            column["parameter"] is None
+                            or candidate.parameter == column["parameter"]
+                        )
+                    ),
+                    None,
+                )
+                value = (
+                    reading.value
+                    if reading is not None
+                    else legacy_values.get(column["key"])
+                    if not assignments
+                    else None
+                )
+                decimals = column["decimals"]
+                assignment = column["assignment"]
+                if (
+                    assignment is not None
+                    and assignment.instrument.driver == Instrument.Driver.MOCK
+                    and assignment.configuration.get("function") == "dc_voltage"
+                    and assignment.configuration.get("source") == "virtual"
+                ):
+                    decimals = VirtualMockBench.voltage_decimal_places(
+                        sample.voltage_setpoint,
+                    )
+                exported_values.append(format_number(value, decimals))
             yield writer.writerow(
                 (
-                    timezone.localtime(sample.timestamp).strftime(
-                        "%d.%m.%Y %H:%M:%S",
+                    sample.index,
+                    timezone.localtime(
+                        sample.timestamp,
+                        export_timezone,
+                    ).isoformat(
+                        timespec="milliseconds",
                     ),
-                    *(
-                        next(
-                            (
-                                f'{reading.value:.{decimals}f} {reading.unit}'
-                                if decimals is not None
-                                else f"{reading.value} {reading.unit}"
-                                for reading in sample_readings
-                                if reading.task_instrument_id == key
-                                and (
-                                    parameter is None
-                                    or reading.parameter == parameter
-                                )
-                            ),
-                            legacy_values.get(key, "")
-                            if not assignments
-                            else "",
-                        )
-                        for key, parameter, _instrument_name, decimals in columns
+                    format_number(
+                        sample.acquisition_time_seconds,
+                        3,
                     ),
+                    *exported_values,
                 ),
             )
 
