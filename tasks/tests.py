@@ -132,7 +132,7 @@ class TaskViewTests(TestCase):
         self.assertContains(response, 'id="saved-task-pane-template"')
         self.assertContains(response, 'id="saved-tasks-tab"')
         self.assertContains(response, 'id="task-status-filter"')
-        self.assertContains(response, "tasks/js/task_tabs.js?v=35")
+        self.assertContains(response, "tasks/js/task_tabs.js?v=36")
         self.assertContains(response, "task-stop-button")
         self.assertContains(response, "task-complete-button")
         self.assertContains(response, "saved-task-elapsed")
@@ -442,6 +442,48 @@ class TaskViewTests(TestCase):
         self.assertEqual(config["start_voltage"], "4.99")
         self.assertEqual(config["stop_voltage"], "4.99")
         self.assertEqual(config["voltage_step"], "0.01")
+        start.assert_called_once()
+
+    @patch("tasks.views.TaskRunner.start")
+    def test_rpi_temperature_can_use_secondary_chart_axis(self, start):
+        sensor = Instrument.objects.create(
+            name="RPi temperature",
+            manufacturer="Raspberry Pi",
+            model_name="CPU thermal sensor",
+            driver=Instrument.Driver.RPI_CPU_TEMPERATURE,
+            address="/sys/class/thermal/thermal_zone0/temp",
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            reverse("task_create"),
+            {
+                "name": "Secondary temperature axis",
+                "measurement_mode": "single",
+                "trigger_hours": "0",
+                "trigger_minutes": "0",
+                "trigger_seconds": "1",
+                "trigger_hundredths": "0",
+                "requested_samples": "2",
+                "instruments": json.dumps(
+                    [
+                        {
+                            "instrument_id": sensor.pk,
+                            "configuration": {
+                                "function": "temperature",
+                                "source": "external",
+                                "chart_axis": "secondary",
+                            },
+                        },
+                    ],
+                ),
+            },
+        )
+
+        self.assertEqual(response.status_code, 201, response.content)
+        assignment = TaskInstrument.objects.get(instrument=sensor)
+        self.assertEqual(assignment.configuration["chart_axis"], "secondary")
+        self.assertEqual(response.json()["result_columns"][0]["axis"], "secondary")
         start.assert_called_once()
 
     def test_task_detail_does_not_expose_another_users_task(self):

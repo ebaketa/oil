@@ -89,12 +89,14 @@ def _serialize_task(task, *, include_samples=False, samples_queryset=None):
                         "parameter": "Voltage setpoint",
                         "label": f'{instrument["name"]} — Set voltage',
                         "decimals": instrument["voltage_decimals"],
+                        "axis": "primary",
                     },
                     {
                         "assignment_id": instrument["assignment_id"],
                         "parameter": "Output voltage readback",
                         "label": f'{instrument["name"]} — Read voltage',
                         "decimals": instrument["voltage_decimals"],
+                        "axis": "primary",
                     },
                 ),
             )
@@ -105,6 +107,7 @@ def _serialize_task(task, *, include_samples=False, samples_queryset=None):
                     "parameter": None,
                     "label": instrument["name"],
                     "decimals": instrument["voltage_decimals"],
+                    "axis": configuration.get("chart_axis", "primary"),
                 },
             )
 
@@ -471,6 +474,10 @@ def task_create(request):
                         "Only a Mock DMM can use a virtual source.",
                     )
                 config["source"] = source
+                chart_axis = config.get("chart_axis", "primary")
+                if chart_axis not in ("primary", "secondary"):
+                    raise ValueError("Select a valid chart Y-axis.")
+                config["chart_axis"] = chart_axis
                 display_off = config.get("display_off", False)
                 if display_off in (True, "true"):
                     display_off = True

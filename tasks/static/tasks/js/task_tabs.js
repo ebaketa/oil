@@ -119,9 +119,14 @@
                 return Number(reading.value);
             }),
         }));
-        const values = datasets.flatMap(
-            (dataset) => dataset.points.filter((value) => value !== null),
-        );
+        const valuesForAxis = (axis) => datasets
+            .filter((dataset) => (dataset.column.axis || "primary") === axis)
+            .flatMap(
+                (dataset) => dataset.points.filter((value) => value !== null),
+            );
+        const primaryValues = valuesForAxis("primary");
+        const secondaryValues = valuesForAxis("secondary");
+        const values = [...primaryValues, ...secondaryValues];
 
         legend.replaceChildren();
         datasets.forEach((dataset) => {
@@ -151,15 +156,31 @@
             context.setTransform(ratio, 0, 0, ratio, 0, 0);
             context.clearRect(0, 0, width, height);
 
-            const plot = {left: 72, right: width - 18, top: 12, bottom: 118};
-            let minimum = Math.min(...values);
-            let maximum = Math.max(...values);
-            const span = maximum - minimum;
-            const margin = span > 0
-                ? span * 0.08
-                : Math.max(Math.abs(maximum) * 0.001, 0.001);
-            minimum -= margin;
-            maximum += margin;
+            const hasSecondary = secondaryValues.length > 0;
+            const plot = {
+                left: hasSecondary ? 136 : 72,
+                right: width - 18,
+                top: 12,
+                bottom: 118,
+            };
+            const scaleFor = (axisValues) => {
+                if (!axisValues.length) {
+                    return null;
+                }
+                let minimum = Math.min(...axisValues);
+                let maximum = Math.max(...axisValues);
+                const span = maximum - minimum;
+                const margin = span > 0
+                    ? span * 0.08
+                    : Math.max(Math.abs(maximum) * 0.001, 0.001);
+                minimum -= margin;
+                maximum += margin;
+                return {minimum, maximum};
+            };
+            const scales = {
+                primary: scaleFor(primaryValues),
+                secondary: scaleFor(secondaryValues),
+            };
 
             const styles = getComputedStyle(canvas);
             const foreground = styles.color || "#212529";
@@ -176,10 +197,28 @@
                 context.moveTo(plot.left, y);
                 context.lineTo(plot.right, y);
                 context.stroke();
-                const value = minimum + fraction * (maximum - minimum);
                 context.textAlign = "right";
                 context.textBaseline = "middle";
-                context.fillText(value.toPrecision(6), plot.left - 8, y);
+                if (scales.primary) {
+                    const primaryValue = scales.primary.minimum + fraction * (
+                        scales.primary.maximum - scales.primary.minimum
+                    );
+                    context.fillText(
+                        primaryValue.toPrecision(6),
+                        plot.left - 8,
+                        y,
+                    );
+                }
+                if (scales.secondary) {
+                    const secondaryValue = scales.secondary.minimum + fraction * (
+                        scales.secondary.maximum - scales.secondary.minimum
+                    );
+                    context.fillText(
+                        secondaryValue.toPrecision(6),
+                        plot.left - 72,
+                        y,
+                    );
+                }
             }
 
             const xFor = (index) => plot.left + (
@@ -188,8 +227,10 @@
                     : index / (samples.length - 1)
                         * (plot.right - plot.left)
             );
-            const yFor = (value) => plot.bottom - (
-                (value - minimum) / (maximum - minimum)
+            const yFor = (value, axis = "primary") => plot.bottom - (
+                (value - scales[axis].minimum) / (
+                    scales[axis].maximum - scales[axis].minimum
+                )
                 * (plot.bottom - plot.top)
             );
             datasets.forEach((dataset) => {
@@ -203,7 +244,10 @@
                         return;
                     }
                     const x = xFor(index);
-                    const y = yFor(value);
+                    const y = yFor(
+                        value,
+                        dataset.column.axis || "primary",
+                    );
                     if (!drawing) {
                         context.moveTo(x, y);
                         drawing = true;
@@ -273,7 +317,13 @@
                     context.strokeStyle = "#ffffff";
                     context.lineWidth = 1.5;
                     context.beginPath();
-                    context.arc(x, yFor(value), 4.5, 0, Math.PI * 2);
+                    context.arc(
+                        x,
+                        yFor(value, dataset.column.axis || "primary"),
+                        4.5,
+                        0,
+                        Math.PI * 2,
+                    );
                     context.fill();
                     context.stroke();
                 });
@@ -595,6 +645,18 @@
                 "external",
                 sourceOptions,
             );
+            if (instrument.driver === "rpi_cpu_temperature") {
+                addField(
+                    fields,
+                    "Chart Y-axis",
+                    "chart_axis",
+                    "primary",
+                    [
+                        ["primary", "Primary"],
+                        ["secondary", "Secondary"],
+                    ],
+                );
+            }
             if ([
                 "agilent_34401a",
                 "keysight_34461a",
