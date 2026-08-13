@@ -90,8 +90,13 @@ def _mark_sample_failed(sample, acquisition_started, exc):
     )
 
 
-def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
-    """Execute one task and persist synchronized samples."""
+def run_automation_task(
+    task_id: int,
+    stop_event: Event | None = None,
+    *,
+    resume: bool = False,
+) -> None:
+    """Execute one task, optionally continuing after its last stored sample."""
     close_old_connections()
     event = stop_event or Event()
     task = (
@@ -104,7 +109,8 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
         .get(pk=task_id)
     )
     task.status = AutomationTask.Status.RUNNING
-    task.started_at = timezone.now()
+    if not resume or task.started_at is None:
+        task.started_at = timezone.now()
     task.finished_at = None
     task.error = ""
     task.stop_requested = False
@@ -117,6 +123,19 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
             "stop_requested",
         ),
     )
+
+    start_index = 1
+    if resume:
+        unfinished = task.samples.filter(status=TaskSample.Status.ACQUIRING)
+        unfinished.update(
+            status=TaskSample.Status.FAILED,
+            error="Acquisition interrupted by application restart.",
+        )
+        last_index = task.samples.order_by("-index").values_list(
+            "index",
+            flat=True,
+        ).first()
+        start_index = (last_index or 0) + 1
 
     assignments = list(task.task_instruments.all())
     flexible = bool(assignments)
@@ -238,10 +257,14 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
                 else (Decimal("0"),)
             )
             sequence = measurement_sequence(task, base_sequence)
-            trigger_started = monotonic() + task.start_delay_seconds
-            for index, voltage in enumerate(sequence, start=1):
+            sequence = islice(sequence, start_index - 1, None)
+            trigger_started = monotonic() + (
+                0 if resume else task.start_delay_seconds
+            )
+            for index, voltage in enumerate(sequence, start=start_index):
                 trigger_deadline = (
-                    trigger_started + (index - 1) * task.interval_seconds
+                    trigger_started
+                    + (index - start_index) * task.interval_seconds
                 )
                 wait_seconds = max(0, trigger_deadline - monotonic())
                 if wait_seconds and event.wait(wait_seconds):
@@ -256,7 +279,7 @@ def run_automation_task(task_id: int, stop_event: Event | None = None) -> None:
                 triggered_at = timezone.now()
                 if supply:
                     supply.set_voltage(voltage)
-                    if index == 1:
+                    if index == start_index:
                         supply.enable_output()
                     if (
                         supply_assignment
@@ -430,7 +453,7 @@ class TaskRunner:
     _lock = Lock()
 
     @classmethod
-    def start(cls, task_id: int) -> None:
+    def start(cls, task_id: int, *, resume: bool = False) -> None:
         with cls._lock:
             if task_id in cls._events:
                 raise ValueError("Task is already scheduled.")
@@ -439,12 +462,31 @@ class TaskRunner:
 
         def execute():
             try:
-                run_automation_task(task_id, event)
+                run_automation_task(task_id, event, resume=resume)
             finally:
                 with cls._lock:
                     cls._events.pop(task_id, None)
 
         cls._executor.submit(execute)
+
+    @classmethod
+    def recover_active_tasks(cls) -> list[int]:
+        """Schedule persisted tasks whose workers disappeared on restart."""
+        active_tasks = list(
+            AutomationTask.objects.filter(
+                status__in=(
+                    AutomationTask.Status.PENDING,
+                    AutomationTask.Status.RUNNING,
+                ),
+                stop_requested=False,
+            ).values_list("pk", "status")
+        )
+        for task_id, status in active_tasks:
+            cls.start(
+                task_id,
+                resume=status == AutomationTask.Status.RUNNING,
+            )
+        return [task_id for task_id, _status in active_tasks]
 
     @classmethod
     def stop(cls, task_id: int) -> None:

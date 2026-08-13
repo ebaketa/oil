@@ -3,11 +3,14 @@
 {% block title %}
 Log in
 {% endblock %}
+{% block body_class %}workspace-page{% endblock %}
 
 {% block content %}
 
 <div class="mx-auto" style="max-width: 28rem;">
-    <h2 class="mb-4">Log in</h2>
+    <div class="oil-page-header">
+        <div class="oil-page-header-main"><h2>Log in</h2></div>
+    </div>
 
     {% if form.errors %}
         <div class="alert alert-danger" role="alert">

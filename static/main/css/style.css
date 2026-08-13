@@ -2,50 +2,96 @@
     --oil-theme-color: #0d6efd;
     --oil-theme-dark: #084298;
     --oil-theme-foreground: #fff;
-    --oil-theme-soft: #e7f1ff;
+    --oil-theme-soft: #d8e2ec;
+    --oil-page-bg: #d8e2ec;
+    --oil-surface: #eef1f4;
+    --oil-surface-alt: #e2e7ec;
+    --oil-text: #212529;
+    --oil-muted: #6c757d;
+    --oil-border: #b8c2cc;
+    --oil-panel-bg: #eef1f4;
+    --oil-panel-display: #e4ebe0;
+    --oil-panel-text: #21351d;
+    --oil-panel-line: #9caf93;
+    --oil-chart-trace: #315f2a;
+    --oil-chart-label: #385033;
+    --oil-chart-grid: rgba(33, 37, 41, 0.2);
+    --oil-chart-tooltip-bg: rgba(255, 255, 255, 0.96);
+    --oil-chart-tooltip-text: #212529;
 }
 
-.oil-theme-red {
-    --oil-theme-color: #dc3545;
-    --oil-theme-dark: #842029;
-    --oil-theme-soft: #f8d7da;
-}
-
-.oil-theme-green {
-    --oil-theme-color: #198754;
-    --oil-theme-dark: #0f5132;
-    --oil-theme-soft: #d1e7dd;
-}
-
-.oil-theme-yellow {
-    --oil-theme-color: #ffc107;
-    --oil-theme-dark: #997404;
-    --oil-theme-foreground: #212529;
-    --oil-theme-soft: #fff3cd;
-}
-
-.oil-theme-orange {
-    --oil-theme-color: #fd7e14;
-    --oil-theme-dark: #984c0c;
-    --oil-theme-foreground: #212529;
-    --oil-theme-soft: #ffe5d0;
-}
-
-.oil-theme-purple {
-    --oil-theme-color: #6f42c1;
-    --oil-theme-dark: #432874;
-    --oil-theme-soft: #e2d9f3;
-}
-
-.oil-theme-teal {
-    --oil-theme-color: #20c997;
-    --oil-theme-dark: #13795b;
-    --oil-theme-foreground: #212529;
-    --oil-theme-soft: #d2f4ea;
+.oil-theme-dark {
+    --oil-theme-color: #315f8f;
+    --oil-theme-dark: #1d3b5a;
+    --oil-theme-soft: #15191e;
+    --oil-page-bg: #15191e;
+    --oil-surface: #20252b;
+    --oil-surface-alt: #2a3037;
+    --oil-text: #e9ecef;
+    --oil-muted: #adb5bd;
+    --oil-border: #495057;
+    --oil-panel-bg: #20252b;
+    --oil-panel-display: #101510;
+    --oil-panel-text: #d8ffb2;
+    --oil-panel-line: #52634c;
+    --oil-chart-trace: #d8ffb2;
+    --oil-chart-label: #b9d6a4;
+    --oil-chart-grid: rgba(233, 236, 239, 0.2);
+    --oil-chart-tooltip-bg: rgba(21, 25, 30, 0.96);
+    --oil-chart-tooltip-text: #f8f9fa;
 }
 
 body.oil-theme {
-    background-color: var(--oil-theme-soft) !important;
+    color: var(--oil-text);
+    background-color: var(--oil-page-bg) !important;
+}
+
+body.oil-theme > .card {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    border-color: var(--oil-theme-color);
+    border-radius: 0;
+}
+
+body.oil-theme > .card > .container-fluid {
+    flex: 1 0 auto;
+}
+
+body.oil-theme > .card > footer {
+    flex: 0 0 auto;
+}
+
+body.oil-theme > .card > header,
+body.oil-theme > .card > footer {
+    border-radius: 0 !important;
+}
+
+.oil-theme .card,
+.oil-theme .oil-dashboard-card,
+.oil-theme .list-group-item,
+.oil-theme .modal-content,
+.oil-theme .dropdown-menu {
+    color: var(--oil-text);
+    background-color: var(--oil-surface);
+    border-color: var(--oil-border);
+}
+
+.oil-theme .text-muted { color: var(--oil-muted) !important; }
+.oil-theme .table { --bs-table-color: var(--oil-text); --bs-table-bg: var(--oil-surface); --bs-table-border-color: var(--oil-border); }
+.oil-theme .tab-content { color: var(--oil-text); background-color: var(--oil-surface); border-color: var(--oil-border) !important; }
+.oil-theme .nav-tabs { --bs-nav-tabs-border-color: var(--oil-border); }
+.oil-theme .nav-tabs .nav-link { color: var(--oil-muted); }
+.oil-theme .nav-tabs .nav-link.active {
+    color: var(--oil-text);
+    background-color: var(--oil-surface);
+    border-color: var(--oil-border) var(--oil-border) var(--oil-surface);
+}
+.oil-theme .form-control,
+.oil-theme .form-select {
+    color: var(--oil-text);
+    background-color: var(--oil-surface-alt);
+    border-color: var(--oil-border);
 }
 
 .oil-theme-bg {
@@ -156,14 +202,229 @@ body.oil-theme {
     text-decoration: underline;
 }
 
-.oil-dashboard-card {
+.oil-header-account .btn {
+    font-size: 1rem;
+    line-height: 1.2;
+    color: var(--oil-theme-foreground);
+    background-color: color-mix(in srgb, var(--oil-theme-color) 90%, black);
+    border-color: color-mix(in srgb, var(--oil-theme-color) 90%, black);
+}
+
+.oil-header-account .btn:hover,
+.oil-header-account .btn:focus {
+    color: var(--oil-theme-foreground);
+    background-color: color-mix(in srgb, var(--oil-theme-color) 80%, black);
+    border-color: color-mix(in srgb, var(--oil-theme-color) 80%, black);
+}
+
+.oil-theme .oil-dashboard-card {
     height: 100%;
+    background-color: color-mix(in srgb, var(--oil-surface) 90%, white);
     box-shadow: var(--bs-box-shadow-sm);
 }
 
 .oil-dashboard-card-title {
     font-size: 1.5rem;
     line-height: 1.2;
+}
+
+.oil-page-header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.oil-page-header-main {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 1rem;
+}
+
+.oil-page-header h2,
+.oil-page-header .oil-page-subtitle {
+    margin-bottom: 0;
+}
+
+.oil-page-header h2 {
+    font-size: 1.75rem;
+    line-height: 1.2;
+}
+
+.oil-page-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.dashboard-page > .card > .container-fluid {
+    margin-top: 0 !important;
+    padding: 0;
+}
+
+.dashboard-page > .card > .container-fluid > .row {
+    margin: 0;
+}
+
+.dashboard-page main {
+    padding: 0;
+}
+
+.dashboard-page main > .card {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none !important;
+}
+
+.dashboard-page main > .card > .card-body {
+    padding-bottom: 1rem;
+}
+
+.dashboard-page > .card > footer {
+    margin-top: 0 !important;
+}
+
+.workspace-page > .card > .container-fluid {
+    margin-top: 0 !important;
+    padding: 0;
+}
+
+.workspace-page > .card > .container-fluid > .row {
+    margin: 0;
+}
+
+.workspace-page main {
+    padding: 0;
+}
+
+.workspace-page main > .card {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none !important;
+}
+
+.workspace-page main > .card > .card-body {
+    padding-bottom: 1rem;
+}
+
+.workspace-page > .card > footer {
+    margin-top: 0 !important;
+}
+
+.dmm-panel {
+    width: 100%;
+    color: var(--oil-text);
+    background: var(--oil-panel-bg);
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.dmm-panel-page main > .card > .card-body {
+    padding: 0;
+}
+
+body.dmm-panel-page {
+    height: 100vh;
+    overflow: hidden;
+}
+
+.dmm-panel-page > .card > footer {
+    margin-top: 0 !important;
+}
+
+.dmm-panel-page > .card > .container-fluid {
+    margin: 0 !important;
+    padding: 0;
+}
+
+.dmm-panel-page > .card > .container-fluid > .row {
+    margin: 0;
+}
+
+.dmm-panel-page main {
+    padding: 0;
+}
+
+.dmm-panel-page main > .card {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none !important;
+}
+
+.dmm-panel-header,
+.dmm-display,
+.dmm-control-bank {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid #59616a;
+}
+
+.dmm-panel-header { color: var(--oil-text); }
+
+.dmm-panel-brand { font-size: 1.25rem; font-weight: 700; letter-spacing: 0.08em; }
+.dmm-display {
+    color: var(--oil-panel-text);
+    background: var(--oil-panel-display);
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+}
+.dmm-function-label { font-size: 1.1rem; letter-spacing: 0.08em; }
+.dmm-reading-area { display: grid; grid-template-columns: minmax(0, 1fr) minmax(18rem, 2fr); flex: 1 1 auto; min-height: 0; }
+.dmm-reading-section { display: flex; min-width: 0; flex-direction: column; }
+.dmm-reading-header { display: flex; justify-content: space-between; padding-bottom: 0.65rem; border-bottom: 1px solid var(--oil-panel-line); }
+.dmm-reading-row { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; justify-content: center; gap: 1rem; overflow: hidden; }
+.dmm-reading { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12rem; line-height: 1; white-space: nowrap; }
+.dmm-unit { font-size: 1.7rem; }
+.dmm-reading-details { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--oil-panel-line); }
+.dmm-detail-column { display: grid; gap: 0.4rem; padding: 0.65rem 0.75rem 0; }
+.dmm-detail-column + .dmm-detail-column { border-left: 1px solid var(--oil-panel-line); }
+.dmm-live-chart { min-width: 0; min-height: 8rem; margin-left: 1.25rem; border-left: 1px solid var(--oil-panel-line); }
+.dmm-chart-canvas { display: block; width: 100%; height: 100%; }
+.dmm-control-bank { border-right: 1px solid #59616a; }
+.dmm-controls { flex: 0 0 auto; align-content: stretch; min-height: 0; }
+.dmm-control-bank { display: flex; align-items: center; }
+.dmm-control-bank > * { width: 100%; }
+.dmm-controls .btn.active { color: #212529; background: #d8ffb2; }
+.dmm-panel .btn-outline-light {
+    --bs-btn-color: var(--oil-text);
+    --bs-btn-border-color: var(--oil-border);
+    --bs-btn-hover-color: var(--oil-panel-bg);
+    --bs-btn-hover-bg: var(--oil-text);
+    --bs-btn-hover-border-color: var(--oil-text);
+}
+
+.dmm-control-bank {
+    padding: 0.45rem 0.65rem;
+}
+
+@media (max-height: 760px) {
+    .dmm-panel-header,
+    .dmm-display {
+        padding: 0.55rem 0.8rem;
+    }
+
+    .dmm-control-bank { padding: 0.35rem 0.55rem; }
+
+    .dmm-reading-row { margin: 0.55rem 0; }
+    .dmm-controls .btn { --bs-btn-padding-y: 0.2rem; }
+}
+
+@media (max-width: 991.98px) {
+    .dmm-reading-area { grid-template-columns: 1fr; }
+    .dmm-live-chart { min-height: 6rem; margin-top: 0.75rem; margin-left: 0; border-top: 1px solid #31402f; border-left: 0; }
+
+    .dmm-controls > .dmm-control-bank {
+        width: 50%;
+        border-right: 1px solid #59616a;
+    }
 }
 
 .oil-measurement-table-scroll {
@@ -179,7 +440,7 @@ body.oil-theme {
     position: sticky;
     top: 0;
     z-index: 1;
-    background-color: var(--bs-body-bg);
+    background-color: var(--oil-surface);
 }
 
 .task-sample-table-scroll {
@@ -195,6 +456,8 @@ body.oil-theme {
     width: 100%;
     height: 10rem;
     cursor: crosshair;
+    color: var(--oil-text);
+    background-color: var(--oil-surface);
 }
 
 .task-chart-legend-item {
@@ -220,8 +483,8 @@ body.oil-theme {
 
 .task-detail-header {
     padding: 1rem 1rem 0.5rem;
-    background-color: var(--bs-gray-200);
-    border: 1px solid var(--bs-gray-300);
+    background-color: var(--oil-surface-alt);
+    border: 1px solid var(--oil-border);
     border-radius: var(--bs-border-radius);
     margin-bottom: 0.5rem;
 }

@@ -35,4 +35,5 @@ readonly SERVER_PORT="${OIL_SERVER_PORT:-$(dotenv_value OIL_SERVER_PORT 8000)}"
 cd "$APP_DIR"
 
 echo "Starting Django server on $SERVER_HOST:$SERVER_PORT..."
+export OIL_RECOVER_TASKS=1
 exec "$PYTHON" "$MANAGE" runserver --noreload "$SERVER_HOST:$SERVER_PORT"

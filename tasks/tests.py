@@ -132,7 +132,7 @@ class TaskViewTests(TestCase):
         self.assertContains(response, 'id="saved-task-pane-template"')
         self.assertContains(response, 'id="saved-tasks-tab"')
         self.assertContains(response, 'id="task-status-filter"')
-        self.assertContains(response, "tasks/js/task_tabs.js?v=36")
+        self.assertContains(response, "tasks/js/task_tabs.js?v=37")
         self.assertContains(response, "task-stop-button")
         self.assertContains(response, "task-complete-button")
         self.assertContains(response, "saved-task-elapsed")
@@ -905,6 +905,43 @@ class AutomationRunnerTests(TestCase):
         }
         values.update(overrides)
         return AutomationTask.objects.create(**values)
+
+    def test_resume_continues_after_last_stored_sample(self):
+        """A restarted task preserves history and uses the next sample index."""
+        started_at = timezone.now() - timedelta(minutes=5)
+        task = self.create_task(
+            status=AutomationTask.Status.RUNNING,
+            started_at=started_at,
+        )
+        TaskSample.objects.create(
+            task=task,
+            index=1,
+            voltage_setpoint=Decimal("0.000"),
+            status=TaskSample.Status.COMPLETED,
+        )
+        interrupted = TaskSample.objects.create(
+            task=task,
+            index=2,
+            voltage_setpoint=Decimal("1.000"),
+            status=TaskSample.Status.ACQUIRING,
+        )
+
+        run_automation_task(task.pk, resume=True)
+
+        task.refresh_from_db()
+        interrupted.refresh_from_db()
+        self.assertEqual(task.status, AutomationTask.Status.COMPLETED)
+        self.assertEqual(task.started_at, started_at)
+        self.assertEqual(interrupted.status, TaskSample.Status.FAILED)
+        self.assertIn("restart", interrupted.error)
+        self.assertEqual(
+            list(task.samples.values_list("index", flat=True)),
+            [1, 2, 3],
+        )
+        self.assertEqual(
+            task.samples.get(index=3).status,
+            TaskSample.Status.COMPLETED,
+        )
 
     def test_voltage_sequences_are_inclusive(self):
         """Sweep and Cycle include configured endpoints."""

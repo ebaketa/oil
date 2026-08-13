@@ -32,6 +32,7 @@ urlpatterns = [
     ),
     path("api/", include("api.urls")),
     path("", include("dashboard.urls")),
+    path("", include("dmm_panel.urls")),
     path("", include("tasks.urls")),
     path("", include("accounts.urls")),
     path("", include("instruments.urls")),

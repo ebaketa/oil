@@ -146,13 +146,13 @@ class ThemePreferenceTests(TestCase):
             password="test-password",
         )
 
-    def test_blue_theme_is_used_by_default(self):
-        """Users without saved preferences receive the blue theme."""
+    def test_light_theme_is_used_by_default(self):
+        """Users without saved preferences receive the light theme."""
         self.client.force_login(self.user)
 
         response = self.client.get(reverse("dashboard"))
 
-        self.assertContains(response, "oil-theme-blue")
+        self.assertContains(response, "oil-theme-light")
         self.assertContains(response, "oil-theme-nav")
         self.assertContains(response, "<aside", html=False)
         self.assertFalse(UserPreference.objects.filter(user=self.user).exists())
@@ -168,7 +168,7 @@ class ThemePreferenceTests(TestCase):
                 "first_name": "",
                 "last_name": "",
                 "email": "",
-                "theme": UserPreference.Theme.BLUE,
+                "theme": UserPreference.Theme.LIGHT,
             },
         )
 
@@ -192,7 +192,7 @@ class ThemePreferenceTests(TestCase):
                 "first_name": "",
                 "last_name": "",
                 "email": "",
-                "theme": UserPreference.Theme.BLUE,
+                "theme": UserPreference.Theme.LIGHT,
                 "show_top_navigation": "on",
                 "show_sidebar": "on",
                 "sidebar_position": UserPreference.SidebarPosition.LEFT,
@@ -214,7 +214,7 @@ class ThemePreferenceTests(TestCase):
                 "first_name": "",
                 "last_name": "",
                 "email": "",
-                "theme": UserPreference.Theme.BLUE,
+                "theme": UserPreference.Theme.LIGHT,
                 "show_top_navigation": "on",
                 "show_sidebar": "on",
                 "sidebar_position": UserPreference.SidebarPosition.RIGHT,
@@ -241,28 +241,28 @@ class ThemePreferenceTests(TestCase):
                 "first_name": "",
                 "last_name": "",
                 "email": "",
-                "theme": UserPreference.Theme.ORANGE,
+                "theme": UserPreference.Theme.DARK,
             },
         )
 
         self.assertRedirects(response, reverse("dashboard"))
         self.assertEqual(
             UserPreference.objects.get(user=self.user).theme,
-            UserPreference.Theme.ORANGE,
+            UserPreference.Theme.DARK,
         )
-        self.assertContains(self.client.get(reverse("about")), "oil-theme-orange")
+        self.assertContains(self.client.get(reverse("about")), "oil-theme-dark")
 
     def test_theme_preferences_are_separate_for_each_user(self):
         """Changing one user's theme does not affect another user."""
         UserPreference.objects.create(
             user=self.user,
-            theme=UserPreference.Theme.RED,
+            theme=UserPreference.Theme.DARK,
         )
         self.client.force_login(self.other_user)
 
         response = self.client.get(reverse("dashboard"))
 
-        self.assertContains(response, "oil-theme-blue")
+        self.assertContains(response, "oil-theme-light")
 
     def test_invalid_theme_is_rejected(self):
         """Values outside the configured theme choices are not stored."""
@@ -283,7 +283,7 @@ class ThemePreferenceTests(TestCase):
         self.assertContains(response, "Select a valid choice")
         self.assertEqual(
             UserPreference.objects.get(user=self.user).theme,
-            UserPreference.Theme.BLUE,
+            UserPreference.Theme.LIGHT,
         )
 
     def test_user_can_update_account_details(self):
@@ -297,7 +297,7 @@ class ThemePreferenceTests(TestCase):
                 "first_name": "Oil",
                 "last_name": "Operator",
                 "email": "operator@example.com",
-                "theme": UserPreference.Theme.GREEN,
+                "theme": UserPreference.Theme.DARK,
             },
         )
 
@@ -318,7 +318,7 @@ class ThemePreferenceTests(TestCase):
                 "first_name": "Oil",
                 "last_name": "Operator",
                 "email": "operator@example.com",
-                "theme": UserPreference.Theme.PURPLE,
+                "theme": UserPreference.Theme.DARK,
             },
         )
 
@@ -328,7 +328,7 @@ class ThemePreferenceTests(TestCase):
         self.assertEqual(self.user.username, "theme-user")
         self.assertEqual(
             UserPreference.objects.get(user=self.user).theme,
-            UserPreference.Theme.BLUE,
+            UserPreference.Theme.LIGHT,
         )
 
     def test_username_links_to_profile(self):

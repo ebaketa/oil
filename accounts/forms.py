@@ -11,7 +11,7 @@ class ProfileForm(forms.ModelForm):
 
     theme = forms.ChoiceField(
         choices=UserPreference.Theme.choices,
-        label="Colour theme",
+        label="Interface theme",
     )
     show_top_navigation = forms.BooleanField(
         required=False,

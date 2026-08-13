@@ -5,17 +5,18 @@
 {% block title %}
 Measurement loop
 {% endblock %}
+{% block body_class %}workspace-page{% endblock %}
 
 {% block content %}
 
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <div>
-        <h2 class="mb-1">Measurement loop</h2>
-        <div class="text-muted">
+<div class="oil-page-header">
+    <div class="oil-page-header-main">
+        <h2>Measurement loop</h2>
+        <div class="text-muted oil-page-subtitle">
             The page will wait while the measurement series is running.
         </div>
     </div>
-    <div class="d-flex gap-2">
+    <div class="oil-page-actions">
         <button class="btn btn-outline-primary"
                 type="button"
                 data-csv-export

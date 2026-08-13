@@ -4,22 +4,42 @@
 {% block title %}
 Dashboard
 {% endblock %}
+{% block body_class %}dashboard-page{% endblock %}
 
 {% block content %}
 
-<h2>Dashboard</h2>
+<div class="oil-page-header">
+    <div class="oil-page-header-main">
+        <h2>Dashboard</h2>
+    </div>
+</div>
 
-<p class="text-muted">Overview of Open Instrument Lab.</p>
-
-<div class="row g-3 mb-4">
+<div class="row g-3">
     <div class="col-sm-6 col-xl-3">
         <a class="text-decoration-none text-body" href="{% url 'task_list' %}">
             <div class="card oil-dashboard-card">
                 <div class="card-body">
                     <div class="oil-dashboard-card-title">Tasks</div>
-                    <div class="text-muted mt-2">
-                        Configure and monitor measurement tasks.
+                    <div class="d-flex gap-4 mt-2">
+                        <div>
+                            <div class="small text-muted">Active</div>
+                            <div class="h3 mb-0">{{ active_task_count }}</div>
+                        </div>
+                        <div>
+                            <div class="small text-muted">Completed</div>
+                            <div class="h3 mb-0">{{ completed_task_count }}</div>
+                        </div>
                     </div>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-sm-6 col-xl-3">
+        <a class="text-decoration-none text-body" href="{% url 'panel_list' %}">
+            <div class="card oil-dashboard-card">
+                <div class="card-body">
+                    <div class="oil-dashboard-card-title">Panels</div>
+                    <div class="display-6">{{ panel_count }}</div>
                 </div>
             </div>
         </a>

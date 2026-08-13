@@ -5,7 +5,7 @@ from .models import UserPreference
 
 def user_theme(request):
     """Expose the current user's theme and available themes to templates."""
-    theme = UserPreference.Theme.BLUE
+    theme = UserPreference.Theme.LIGHT
     show_top_navigation = True
     show_sidebar = True
     sidebar_position = UserPreference.SidebarPosition.LEFT

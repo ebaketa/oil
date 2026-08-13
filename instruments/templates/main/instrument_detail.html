@@ -4,12 +4,15 @@
 {% block title %}
 {{ instrument.name }}
 {% endblock %}
+{% block body_class %}workspace-page{% endblock %}
 
 {% block content %}
 
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2 class="mb-0">{{ instrument.name }}</h2>
-    <div class="d-flex gap-2">
+<div class="oil-page-header">
+    <div class="oil-page-header-main">
+        <h2>{{ instrument.name }}</h2>
+    </div>
+    <div class="oil-page-actions">
         <a class="btn btn-outline-secondary" href="{% url 'instrument_list' %}">
             Back
         </a>

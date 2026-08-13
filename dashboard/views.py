@@ -5,19 +5,33 @@ from django.shortcuts import render
 
 from main.models import Instrument, Measurement
 from services.connection_manager import ConnectionManager
+from tasks.models import AutomationTask
 
 
 @login_required
 def dashboard(request):
     """Render the dashboard page."""
     instruments = Instrument.objects.all()
+    tasks = AutomationTask.objects.all()
     connected_ids = ConnectionManager.connected_ids()
     return render(
         request,
         "main/dashboard.html",
         {
             "instruments": instruments,
+            "active_task_count": tasks.filter(
+                status__in=(
+                    AutomationTask.Status.PENDING,
+                    AutomationTask.Status.RUNNING,
+                ),
+            ).count(),
+            "completed_task_count": tasks.filter(
+                status=AutomationTask.Status.COMPLETED,
+            ).count(),
             "instrument_count": instruments.count(),
+            "panel_count": sum(
+                1 for instrument in instruments if instrument.capabilities
+            ),
             "reachable_instrument_count": instruments.filter(
                 status=Instrument.Status.REACHABLE,
             ).exclude(pk__in=connected_ids).count(),

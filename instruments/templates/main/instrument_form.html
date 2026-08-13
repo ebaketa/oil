@@ -4,11 +4,14 @@
 {% block title %}
 {{ page_title }}
 {% endblock %}
+{% block body_class %}workspace-page{% endblock %}
 
 {% block content %}
 
 <div class="mx-auto" style="max-width: 42rem;">
-    <h2 class="mb-4">{{ page_title }}</h2>
+    <div class="oil-page-header">
+        <div class="oil-page-header-main"><h2>{{ page_title }}</h2></div>
+    </div>
 
     <form method="post" novalidate>
         {% csrf_token %}

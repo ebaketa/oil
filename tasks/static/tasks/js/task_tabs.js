@@ -184,7 +184,14 @@
 
             const styles = getComputedStyle(canvas);
             const foreground = styles.color || "#212529";
-            const grid = "rgba(128, 128, 128, 0.25)";
+            const grid = styles.getPropertyValue("--oil-chart-grid").trim()
+                || "rgba(128, 128, 128, 0.25)";
+            const tooltipBackground = styles.getPropertyValue(
+                "--oil-chart-tooltip-bg",
+            ).trim() || "rgba(33, 37, 41, 0.92)";
+            const tooltipForeground = styles.getPropertyValue(
+                "--oil-chart-tooltip-text",
+            ).trim() || "#ffffff";
             context.font = "12px system-ui, sans-serif";
             context.fillStyle = foreground;
             context.strokeStyle = grid;
@@ -314,7 +321,7 @@
                         + `${reading?.unit ? ` ${reading.unit}` : ""}`,
                     );
                     context.fillStyle = dataset.color;
-                    context.strokeStyle = "#ffffff";
+                    context.strokeStyle = tooltipForeground;
                     context.lineWidth = 1.5;
                     context.beginPath();
                     context.arc(
@@ -338,14 +345,14 @@
                     tooltipX = x - tooltipWidth - 10;
                 }
                 const tooltipY = plot.top + 8;
-                context.fillStyle = "rgba(33, 37, 41, 0.92)";
+                context.fillStyle = tooltipBackground;
                 context.fillRect(
                     tooltipX,
                     tooltipY,
                     tooltipWidth,
                     tooltipHeight,
                 );
-                context.fillStyle = "#ffffff";
+                context.fillStyle = tooltipForeground;
                 context.textAlign = "left";
                 context.textBaseline = "top";
                 tooltipLines.forEach((line, index) => {

@@ -11,13 +11,8 @@ class UserPreference(models.Model):
     class Theme(models.TextChoices):
         """Available interface colour themes."""
 
-        BLUE = "blue", "Blue"
-        RED = "red", "Red"
-        GREEN = "green", "Green"
-        YELLOW = "yellow", "Yellow"
-        ORANGE = "orange", "Orange"
-        PURPLE = "purple", "Purple"
-        TEAL = "teal", "Teal"
+        LIGHT = "light", "Light"
+        DARK = "dark", "Dark"
 
     class SidebarPosition(models.TextChoices):
         """Available horizontal sidebar positions."""
@@ -33,7 +28,7 @@ class UserPreference(models.Model):
     theme = models.CharField(
         max_length=16,
         choices=Theme.choices,
-        default=Theme.BLUE,
+        default=Theme.LIGHT,
     )
     show_top_navigation = models.BooleanField(default=True)
     show_sidebar = models.BooleanField(default=True)

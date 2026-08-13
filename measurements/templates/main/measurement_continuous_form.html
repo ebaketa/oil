@@ -5,17 +5,18 @@
 {% block title %}
 Continuous measurement
 {% endblock %}
+{% block body_class %}workspace-page{% endblock %}
 
 {% block content %}
 
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <div>
-        <h2 class="mb-1">Continuous measurement</h2>
-        <div class="text-muted">
+<div class="oil-page-header">
+    <div class="oil-page-header-main">
+        <h2>Continuous measurement</h2>
+        <div class="text-muted oil-page-subtitle">
             Measurements continue over one connection until Stop is selected.
         </div>
     </div>
-    <div class="d-flex gap-2">
+    <div class="oil-page-actions">
         <button class="btn btn-outline-primary"
                 type="button"
                 data-csv-export

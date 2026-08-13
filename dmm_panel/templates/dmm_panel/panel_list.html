@@ -1,0 +1,51 @@
+{% extends "main/base.html" %}
+
+{% block title %}Panels{% endblock %}
+{% block body_class %}workspace-page{% endblock %}
+
+{% block content %}
+<div class="oil-page-header">
+    <div class="oil-page-header-main">
+        <h2 class="mb-0">Panels</h2>
+        <div class="text-muted oil-page-subtitle">
+            {{ panel_instruments|length }} instrument panel{{ panel_instruments|length|pluralize }}
+        </div>
+    </div>
+    <div class="oil-page-actions">
+        <a class="btn btn-outline-secondary" href="{% url 'dashboard' %}">Back</a>
+    </div>
+</div>
+
+{% if panel_instruments %}
+<div class="row g-3">
+    {% for instrument in panel_instruments %}
+    <div class="col-sm-6 col-xl-4">
+        <div class="card oil-dashboard-card">
+            <div class="card-body d-flex flex-column">
+                <div class="oil-dashboard-card-title">{{ instrument.name }}</div>
+                <div class="text-muted mb-3">
+                    {{ instrument.manufacturer }} {{ instrument.model_name }}
+                </div>
+                <div class="small mb-3">
+                    {{ instrument.get_driver_display }} ·
+                    {% if instrument.active_task %}
+                        <span class="text-warning fw-semibold">
+                            In use · Task {{ instrument.active_task.pk }}
+                        </span>
+                    {% else %}
+                        {{ instrument.get_status_display }}
+                    {% endif %}
+                </div>
+                <a class="btn btn-primary mt-auto"
+                   href="{% url 'dmm_panel' instrument.pk %}">
+                    Open DMM Panel
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p class="text-muted">No instrument panels are available.</p>
+{% endif %}
+{% endblock %}
