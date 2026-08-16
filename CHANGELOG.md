@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added responsive DMM panels with local continuous measurement, single
+  trigger, driver-backed range controls, live Task-owned read-only values,
+  statistics, trigger activity, and an automatically scaled graph.
+- Added selectable 3½ through 6½-digit Mock DMM DC voltage modes from 2,000 to
+  1,200,000 counts with range-dependent quantization and display precision.
+- Added Raspberry Pi CPU temperature acquisition with two-decimal readings and
+  optional secondary Task chart-axis assignment.
+- Added automatic recovery of persisted Pending and Running Tasks after an
+  application restart, preserving completed history and continuing at the next
+  sample index.
+- Added European Task CSV export with semicolon delimiters, decimal commas,
+  millisecond ISO 8601 timestamps, and the Europe/Berlin UTC offset.
+
 - Added an RND Lab 320-KA3005P DC power-supply driver for its documented
   9600-baud serial protocol, including identification, voltage and current
   programming, output control, readback, validation, and safe shutdown.

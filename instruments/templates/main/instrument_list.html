@@ -6,40 +6,21 @@
 Instruments
 {% endblock %}
 {% block body_class %}workspace-page{% endblock %}
+{% block oil_header_page_title %}<div class="oil-header-page-title">Instruments</div>{% endblock %}
+{% block oil_header_page_subtitle %}<div class="small opacity-75">{{ instrument_count }} instrument{{ instrument_count|pluralize }}</div>{% endblock %}
+{% block oil_header_actions %}
+<div class="oil-page-actions oil-header-actions">
+    <a class="btn btn-sm btn-outline-light" href="{% url 'dashboard' %}">Back</a>
+    {% if user.is_staff %}
+        <a class="btn btn-sm btn-light" href="{% url 'instrument_create' %}">Add instrument</a>
+        <button id="instrument-edit-button" class="btn btn-sm btn-outline-light" type="button">Edit</button>
+        <button id="instrument-delete-button" class="btn btn-sm btn-outline-light" type="button">Delete</button>
+        <form id="instrument-delete-form" method="post" class="d-none">{% csrf_token %}</form>
+    {% endif %}
+</div>
+{% endblock %}
 
 {% block content %}
-
-<div class="oil-page-header">
-    <div class="oil-page-header-main">
-        <h2 class="mb-0">Instruments</h2>
-        <div class="text-muted oil-page-subtitle">
-            {{ instrument_count }} instrument{{ instrument_count|pluralize }}
-        </div>
-    </div>
-    <div class="oil-page-actions">
-        <a class="btn btn-outline-secondary" href="{% url 'dashboard' %}">
-            Back
-        </a>
-        {% if user.is_staff %}
-            <a class="btn btn-primary" href="{% url 'instrument_create' %}">
-                Add instrument
-            </a>
-            <button id="instrument-edit-button"
-                    class="btn btn-primary"
-                    type="button">
-                Edit
-            </button>
-            <button id="instrument-delete-button"
-                    class="btn btn-danger"
-                    type="button">
-                Delete
-            </button>
-            <form id="instrument-delete-form" method="post" class="d-none">
-                {% csrf_token %}
-            </form>
-        {% endif %}
-    </div>
-</div>
 
 <div class="table-responsive">
     <table class="table align-middle">

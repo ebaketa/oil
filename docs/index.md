@@ -4,11 +4,15 @@ Open Instrument Lab (OIL) is a Django application intended to support
 laboratory instrument workflows.
 
 The project is currently in an early development stage. Authenticated users can
-manage a shared instrument inventory and run Single, Continuous, and Loop
-measurements. Drivers support the Agilent 34401A over serial/FTDI, the Keysight
-34461A over Linux USBTMC, the RND Lab 320-KA3005P power supply over serial, and
-a deterministic Mock DMM. Stored
-measurements can be queried through JSON or downloaded as CSV.
+manage a shared instrument inventory, configure persistent automation Tasks,
+and monitor registered instruments through responsive DMM panels. Drivers
+support the Agilent 34401A over serial/FTDI, the Keysight 34461A over Linux
+USBTMC, Mock and physical RND power supplies, a deterministic Mock DMM, and
+Raspberry Pi CPU temperature. Task results can be monitored live and downloaded
+as a European-format CSV file.
+
+See [Automation Tasks](tasks.md) for acquisition and recovery behavior and
+[DMM Panels](panels.md) for local and Task-owned panel operation.
 
 ## Documentation workflow
 

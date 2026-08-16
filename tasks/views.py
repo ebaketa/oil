@@ -178,12 +178,21 @@ def _serialize_task(task, *, include_samples=False, samples_queryset=None):
                     reading.parameter == "Voltage DC"
                     and reading.task_instrument.instrument.driver
                     == Instrument.Driver.MOCK
-                    and reading.task_instrument.configuration.get("source")
-                    == AutomationTask.VoltageSource.VIRTUAL
                 ):
+                    configuration = reading.task_instrument.configuration
+                    reference_voltage = (
+                        sample.voltage_setpoint
+                        if configuration.get("source")
+                        == AutomationTask.VoltageSource.VIRTUAL
+                        else reading.value
+                    )
                     decimals = (
                         VirtualMockBench.voltage_decimal_places(
-                            sample.voltage_setpoint,
+                            reference_voltage,
+                            configuration.get(
+                                "count_mode",
+                                VirtualMockBench.DEFAULT_COUNT_MODE,
+                            ),
                         )
                     )
                     serialized_reading["decimals"] = decimals
@@ -474,6 +483,20 @@ def task_create(request):
                         "Only a Mock DMM can use a virtual source.",
                     )
                 config["source"] = source
+                if (
+                    instrument.driver == Instrument.Driver.MOCK
+                    and function == "dc_voltage"
+                ):
+                    count_mode = str(
+                        config.get(
+                            "count_mode",
+                            VirtualMockBench.DEFAULT_COUNT_MODE,
+                        ),
+                    )
+                    VirtualMockBench.validate_count_mode(count_mode)
+                    config["count_mode"] = count_mode
+                else:
+                    config.pop("count_mode", None)
                 chart_axis = config.get("chart_axis", "primary")
                 if chart_axis not in ("primary", "secondary"):
                     raise ValueError("Select a valid chart Y-axis.")
@@ -876,10 +899,18 @@ def task_export_csv(request, pk):
                     assignment is not None
                     and assignment.instrument.driver == Instrument.Driver.MOCK
                     and assignment.configuration.get("function") == "dc_voltage"
-                    and assignment.configuration.get("source") == "virtual"
                 ):
+                    reference_voltage = (
+                        sample.voltage_setpoint
+                        if assignment.configuration.get("source") == "virtual"
+                        else value
+                    )
                     decimals = VirtualMockBench.voltage_decimal_places(
-                        sample.voltage_setpoint,
+                        reference_voltage,
+                        assignment.configuration.get(
+                            "count_mode",
+                            VirtualMockBench.DEFAULT_COUNT_MODE,
+                        ),
                     )
                 exported_values.append(format_number(value, decimals))
             yield writer.writerow(

@@ -5,37 +5,24 @@
 Tasks
 {% endblock %}
 {% block body_class %}workspace-page{% endblock %}
+{% block oil_header_page_title %}<div class="oil-header-page-title">Task</div>{% endblock %}
+{% block oil_header_page_subtitle %}<div class="small opacity-75">Configure and monitor measurement tasks</div>{% endblock %}
+{% block oil_header_actions %}
+<div class="oil-page-actions oil-header-actions">
+    <a class="btn btn-sm btn-outline-light" href="{% url 'dashboard' %}">Back</a>
+    <button class="btn btn-sm btn-light" id="task-new-button" type="button">New</button>
+    <button class="btn btn-sm btn-outline-light"
+            id="task-open-button"
+            type="button"
+            {% if not saved_tasks %}disabled{% endif %}>Open</button>
+    <button class="btn btn-sm btn-outline-light"
+            id="task-delete-button"
+            type="button"
+            {% if not saved_tasks %}disabled{% endif %}>Delete</button>
+</div>
+{% endblock %}
 
 {% block content %}
-
-<div class="oil-page-header">
-    <div class="oil-page-header-main">
-        <h2 class="mb-0">Tasks</h2>
-        <p class="text-muted mb-0">
-            Configure and monitor measurement tasks.
-        </p>
-    </div>
-    <div class="oil-page-actions">
-        <a class="btn btn-outline-secondary" href="{% url 'dashboard' %}">
-            Back
-        </a>
-        <button class="btn btn-primary" id="task-new-button" type="button">
-            New
-        </button>
-        <button class="btn btn-outline-primary"
-                id="task-open-button"
-                type="button"
-                {% if not saved_tasks %}disabled{% endif %}>
-            Open
-        </button>
-        <button class="btn btn-outline-danger"
-                id="task-delete-button"
-                type="button"
-                {% if not saved_tasks %}disabled{% endif %}>
-            Delete
-        </button>
-    </div>
-</div>
 
 <div class="d-none" id="task-csrf-token">{% csrf_token %}</div>
 {{ available_instruments|json_script:"task-available-instruments" }}
@@ -154,7 +141,7 @@ Tasks
 
 <template id="task-pane-template">
     <section class="tab-pane fade" role="tabpanel" tabindex="0">
-        <form class="task-create-form" action="{% url 'task_create' %}">
+        <form class="task-create-form" action="{% url 'task_create' %}" novalidate>
             {% csrf_token %}
             <div class="row g-3 mb-4">
                 <div class="col-md-4">
@@ -350,5 +337,5 @@ Tasks
 {% endblock %}
 
 {% block scripts %}
-<script src="{% static 'tasks/js/task_tabs.js' %}?v=37"></script>
+<script src="{% static 'tasks/js/task_tabs.js' %}?v=39"></script>
 {% endblock %}

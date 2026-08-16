@@ -2,24 +2,20 @@
 
 {% block title %}Panels{% endblock %}
 {% block body_class %}workspace-page{% endblock %}
+{% block oil_header_page_title %}<div class="oil-header-page-title">Panels</div>{% endblock %}
+{% block oil_header_page_subtitle %}<div class="small opacity-75">Active: {{ active_panel_count }} | Available: {{ available_panel_count }}</div>{% endblock %}
+{% block oil_header_actions %}
+<div class="oil-page-actions oil-header-actions">
+    <a class="btn btn-sm btn-outline-light" href="{% url 'dashboard' %}">Back</a>
+</div>
+{% endblock %}
 
 {% block content %}
-<div class="oil-page-header">
-    <div class="oil-page-header-main">
-        <h2 class="mb-0">Panels</h2>
-        <div class="text-muted oil-page-subtitle">
-            {{ panel_instruments|length }} instrument panel{{ panel_instruments|length|pluralize }}
-        </div>
-    </div>
-    <div class="oil-page-actions">
-        <a class="btn btn-outline-secondary" href="{% url 'dashboard' %}">Back</a>
-    </div>
-</div>
 
 {% if panel_instruments %}
 <div class="row g-3">
     {% for instrument in panel_instruments %}
-    <div class="col-sm-6 col-xl-4">
+    <div class="col-sm-6 col-xl-3">
         <div class="card oil-dashboard-card">
             <div class="card-body d-flex flex-column">
                 <div class="oil-dashboard-card-title">{{ instrument.name }}</div>

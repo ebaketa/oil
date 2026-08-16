@@ -204,6 +204,14 @@ def run_automation_task(
             }
             for assignment in assignments:
                 driver = drivers[assignment.instrument_id]
+                set_count_mode = getattr(driver, "set_count_mode", None)
+                if set_count_mode is not None:
+                    set_count_mode(
+                        assignment.configuration.get(
+                            "count_mode",
+                            VirtualMockBench.DEFAULT_COUNT_MODE,
+                        ),
+                    )
                 if assignment.configuration.get("display_off", False):
                     stack.callback(driver.set_display_enabled, True)
                     driver.set_display_enabled(False)
@@ -372,6 +380,10 @@ def run_automation_task(
                             )
                             value = legacy_bench.measure_voltage(
                                 measure_virtual_voltage(),
+                                config.get(
+                                    "count_mode",
+                                    VirtualMockBench.DEFAULT_COUNT_MODE,
+                                ),
                             )
                             parameter = "Voltage DC"
                             unit = "V"

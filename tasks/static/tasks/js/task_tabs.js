@@ -645,13 +645,30 @@
             if (instrument.driver === "mock-dmm") {
                 sourceOptions.push(["virtual", "Virtual power supply"]);
             }
-            addField(
+            const sourceField = addField(
                 fields,
                 "Source",
                 "source",
                 "external",
                 sourceOptions,
             );
+            const countMode = instrument.driver === "mock-dmm"
+                ? addField(
+                    fields,
+                    "Resolution mode",
+                    "count_mode",
+                    "50000",
+                    [
+                        ["2000", "2,000 count (3½ digit)"],
+                        ["4000", "4,000 count (3¾ digit)"],
+                        ["20000", "20,000 count (4½ digit)"],
+                        ["50000", "50,000 count (4¾ digit)"],
+                        ["60000", "60,000 count (4¾ digit)"],
+                        ["200000", "200,000 count (5½ digit)"],
+                        ["1200000", "1,200,000 count (6½ digit)"],
+                    ],
+                )
+                : null;
             if (instrument.driver === "rpi_cpu_temperature") {
                 addField(
                     fields,
@@ -711,8 +728,17 @@
                         !visible,
                     );
                 });
+                const countModeVisible = (
+                    instrument.driver === "mock-dmm"
+                    && functionField.value === "dc_voltage"
+                );
+                countMode?.closest(".col-md-6").classList.toggle(
+                    "d-none",
+                    !countModeVisible,
+                );
             };
             functionField.addEventListener("change", updateTemperatureFields);
+            sourceField.addEventListener("change", updateTemperatureFields);
             updateTemperatureFields();
         }
     };

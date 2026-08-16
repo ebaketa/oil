@@ -3,7 +3,7 @@
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
 
-from main.models import Instrument, Measurement
+from main.models import Instrument
 from services.connection_manager import ConnectionManager
 from tasks.models import AutomationTask
 
@@ -38,7 +38,6 @@ def dashboard(request):
             "online_instrument_count": instruments.filter(
                 pk__in=connected_ids,
             ).count(),
-            "measurement_count": Measurement.objects.count(),
         },
     )
 

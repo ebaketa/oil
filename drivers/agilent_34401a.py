@@ -20,6 +20,7 @@ class Agilent34401ADriver(BaseInstrumentDriver):
             label="DC voltage",
             unit="V",
             autorange=True,
+            ranges=(0.1, 1.0, 10.0, 100.0, 1000.0),
         ),
         "ac_voltage": MeasurementCapability(
             label="AC voltage",
@@ -194,12 +195,36 @@ class Agilent34401ADriver(BaseInstrumentDriver):
                 f"The instrument rejected command {command!r}: {error}"
             )
 
-    def measure_dc_voltage(self) -> MeasurementResult:
-        """Measure DC voltage and return a normalized numeric result."""
+    def measure_dc_voltage(
+        self,
+        voltage_range: float | None = None,
+    ) -> MeasurementResult:
+        """Measure DC voltage using autorange or a supported fixed range."""
+        if (
+            voltage_range is not None
+            and voltage_range not in self.CAPABILITIES["dc_voltage"].ranges
+        ):
+            raise MeasurementError(
+                f"Unsupported Agilent 34401A DC voltage range: "
+                f"{voltage_range} V."
+            )
+        configuration = (
+            "dc_voltage"
+            if voltage_range is None
+            else f"dc_voltage:{voltage_range:g}"
+        )
         return self._measure_function(
-            function="dc_voltage",
-            configure_command="CONF:VOLT:DC",
-            autorange_command="VOLT:DC:RANG:AUTO ON",
+            function=configuration,
+            configure_command=(
+                "CONF:VOLT:DC"
+                if voltage_range is None
+                else f"CONF:VOLT:DC {voltage_range:g}"
+            ),
+            autorange_command=(
+                "VOLT:DC:RANG:AUTO ON"
+                if voltage_range is None
+                else "VOLT:DC:RANG:AUTO OFF"
+            ),
             parameter="Voltage DC",
             unit="V",
         )
@@ -248,7 +273,7 @@ class Agilent34401ADriver(BaseInstrumentDriver):
                 self.write(autorange_command)
                 time.sleep(0.1)
                 self._prepared_function = function
-                self._dc_voltage_prepared = function == "dc_voltage"
+                self._dc_voltage_prepared = function.startswith("dc_voltage")
 
             self.write("READ?")
             response = self.transport.read(timeout=10)

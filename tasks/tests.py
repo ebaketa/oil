@@ -50,6 +50,37 @@ class VirtualMockBenchTests(TestCase):
             ],
         )
 
+    def test_200000_count_mode_uses_five_and_a_half_digit_ranges(self):
+        self.assertEqual(
+            [
+                self.create_bench().voltage_resolution(value, "200000")
+                for value in ("0.199", "1.99", "19.9", "199", "999")
+            ],
+            [
+                Decimal("0.000001"),
+                Decimal("0.00001"),
+                Decimal("0.0001"),
+                Decimal("0.001"),
+                Decimal("0.01"),
+            ],
+        )
+
+    def test_digit_class_modes_publish_expected_resolution(self):
+        expected = {
+            "2000": ("1.999", Decimal("0.001")),
+            "4000": ("3.999", Decimal("0.001")),
+            "20000": ("19.999", Decimal("0.001")),
+            "60000": ("59.999", Decimal("0.001")),
+            "200000": ("199.999", Decimal("0.001")),
+            "1200000": ("1.199999", Decimal("0.000001")),
+        }
+        for mode, (value, resolution) in expected.items():
+            with self.subTest(mode=mode):
+                self.assertEqual(
+                    self.create_bench().voltage_resolution(value, mode),
+                    resolution,
+                )
+
     def test_voltage_measurement_error_is_at_most_two_counts(self):
         for voltage in ("0.499", "4.99", "30"):
             with self.subTest(voltage=voltage):
@@ -106,7 +137,11 @@ class TaskViewTests(TestCase):
         response = self.client.get(reverse("task_list"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, '<h2 class="mb-0">Tasks</h2>', html=True)
+        self.assertContains(
+            response,
+            '<div class="oil-header-page-title">Task</div>',
+            html=True,
+        )
 
     def test_navigation_contains_task_link(self):
         """The shared navigation links to the Tasks workspace."""
@@ -132,7 +167,7 @@ class TaskViewTests(TestCase):
         self.assertContains(response, 'id="saved-task-pane-template"')
         self.assertContains(response, 'id="saved-tasks-tab"')
         self.assertContains(response, 'id="task-status-filter"')
-        self.assertContains(response, "tasks/js/task_tabs.js?v=37")
+        self.assertContains(response, "tasks/js/task_tabs.js?v=39")
         self.assertContains(response, "task-stop-button")
         self.assertContains(response, "task-complete-button")
         self.assertContains(response, "saved-task-elapsed")
@@ -298,6 +333,7 @@ class TaskViewTests(TestCase):
                             "configuration": {
                                 "function": "dc_voltage",
                                 "source": "virtual",
+                                "count_mode": "200000",
                             },
                         },
                     ],
@@ -318,6 +354,12 @@ class TaskViewTests(TestCase):
         self.assertEqual(task.start_delay_seconds, 1)
         self.assertEqual(task.requested_samples, 1000)
         self.assertEqual(task.task_instruments.count(), 2)
+        self.assertEqual(
+            task.task_instruments.get(
+                instrument=self.instrument,
+            ).configuration["count_mode"],
+            "200000",
+        )
         self.assertTrue(
             task.task_instruments.get(
                 instrument=self.power_supply,

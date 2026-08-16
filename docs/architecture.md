@@ -18,6 +18,11 @@ Browser → Views → Services → ConnectionManager → Drivers → Instrument
   templates, and admin configuration.
 - `measurements` owns acquisition forms, views, services, session state, URLs,
   templates, static assets, and admin configuration.
+- `tasks` owns persistent multi-instrument automation configuration, background
+  execution, synchronized samples, generic readings, live charts, and Task CSV
+  export.
+- `dmm_panel` provides responsive local and read-only live front panels for
+  registered measurement instruments.
 - `main` is the transitional database and compatibility application. It retains
   the existing models and migration history so application decomposition does
   not rename tables, recreate records, or invalidate permissions.
@@ -89,7 +94,16 @@ function-specific readings for DC voltage, AC voltage, DC current, AC current,
 resistance, and temperature while following the same connect, identify,
 measure, and disconnect lifecycle as physical hardware. The
 `mock-dmm://timeout` and `mock-dmm://connection-error` profiles support deterministic
-failure-path testing.
+failure-path testing. DC voltage supports selectable 3½, 3¾, 4½, 4¾, 5½, and
+6½-digit modes from 2,000 to 1,200,000 counts. Each mode publishes full-scale
+ranges and quantization resolution used consistently by the runner, Task table,
+DMM panel, and CSV export. The original 50,000-count 4¾ profile remains
+available for compatibility with saved Tasks.
+
+The Raspberry Pi CPU temperature driver reads Linux thermal-zone millidegrees
+from `/sys/class/thermal/thermal_zone0/temp`, normalizes the result to degrees
+Celsius, and reports two decimal places. It is read-only and can be assigned to
+the primary or secondary Task chart axis.
 
 The separate Mock DC Power Supply uses `mock-psu://default`. It provides a
 single programmable output from 0.000 V to 60.000 V in exact 0.001 V steps.
@@ -111,7 +125,8 @@ collection of `TaskInstrument` assignments with driver-specific JSON
 configuration, synchronized `TaskSample` steps, and generic `TaskReading`
 values. The New Task builder starts empty: users add inventory instruments
 from a combobox and configure each in its own nested tab. Mock supply settings
-support a fixed setpoint, inclusive one-way sweep, or repeated up/down cycle.
+support a fixed setpoint, inclusive one-way sweep, optional return sweep, or
+repeated up/down cycle.
 DMM tabs expose only capabilities published by the selected driver. A Mock DMM
 can follow the enabled virtual supply output with deterministic
 millivolt-scale error or use its external independent sequence. Temperature
@@ -120,10 +135,13 @@ values use a stored random seed, range, and resolution so a run is repeatable.
 The current runner uses a bounded thread pool inside the Django process. It is
 independent of the browser page, polls a database stop flag, stores each sample,
 and closes every managed instrument connection through guaranteed cleanup.
-The Mock supply also disables its output on disconnect. This first background
-implementation is intended for the single-process development deployment; an
-application restart interrupts active tasks, and a future dedicated worker
-should claim queued jobs and reconcile interrupted states.
+The Mock supply also disables its output on disconnect. At application startup,
+persisted Pending and Running tasks without a stop request are scheduled again.
+A resumed task marks any sample left in Acquiring state as failed, preserves
+completed history, skips the original start delay, and continues with the next
+sample index. Recovery is designed for the supplied single-process deployment;
+a multi-process production deployment still requires a dedicated worker or a
+database-backed task-claim mechanism.
 
 ## Connection Manager
 
@@ -190,10 +208,28 @@ temporary operations normally return it to zero after cleanup. The Dashboard
 groups are mutually exclusive, so an online instrument is not also included in
 the reachable count.
 
-## Measurements
+## Task results and CSV
 
-The Dashboard shows the number of stored measurements and links to a dedicated
-Measurements page. Measurement records reference their instrument and store a
+Task results use one `TaskSample` row per trigger. Instrument readings belonging
+to that trigger are stored as related `TaskReading` rows, so a sample ID is not
+the same as one individual instrument reading. The live Task table deliberately
+loads a bounded recent result set for browser performance.
+
+Task CSV export pivots those related readings into one row per sample and one
+column per configured output. It streams rows instead of buffering the complete
+file, uses `;` as the delimiter, a decimal comma, and CRLF line endings. Time is
+stored by Django as an aware timestamp and exported in the `Europe/Berlin` zone
+as ISO 8601 with milliseconds and a numeric UTC offset, for example:
+
+```text
+125;2026-08-11T14:32:05.174+02:00;0,174;5,00;5,00;4,9999;48,75
+```
+
+## Legacy Measurements
+
+The older Measurements domain and routes remain available for compatibility,
+but its page is currently hidden from primary Dashboard and navigation links.
+Measurement records reference their instrument and store a
 normalized parameter, numeric value, unit, optional notes, and capture
 timestamp.
 

@@ -163,7 +163,10 @@ class BaseInstrumentDriver(ABC):
             autorange=True,
         )
 
-    def measure_dc_voltage(self) -> MeasurementResult:
+    def measure_dc_voltage(
+        self,
+        voltage_range: float | None = None,
+    ) -> MeasurementResult:
         """Measure DC voltage and return a normalized result."""
         raise MeasurementError("This driver does not support DC voltage.")
 

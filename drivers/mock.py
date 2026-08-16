@@ -1,6 +1,7 @@
 """Deterministic instrument driver for development and demonstrations."""
 
 from collections.abc import Iterable
+from decimal import Decimal, ROUND_HALF_UP
 from itertools import cycle
 
 from .base import BaseInstrumentDriver, MeasurementCapability, MeasurementResult
@@ -21,6 +22,66 @@ class MockInstrumentDriver(BaseInstrumentDriver):
         "temperature": (23.0, 23.1, 23.0, 22.9),
     }
     IDENTITY = "OIL,MOCK-DMM,0001,1.0"
+    DEFAULT_COUNT_MODE = "50000"
+    VOLTAGE_COUNT_MODES = {
+        "2000": (
+            (Decimal("0.2"), Decimal("0.0001")),
+            (Decimal("2"), Decimal("0.001")),
+            (Decimal("20"), Decimal("0.01")),
+            (Decimal("200"), Decimal("0.1")),
+            (Decimal("1000"), Decimal("1")),
+        ),
+        "4000": (
+            (Decimal("0.4"), Decimal("0.0001")),
+            (Decimal("4"), Decimal("0.001")),
+            (Decimal("40"), Decimal("0.01")),
+            (Decimal("400"), Decimal("0.1")),
+            (Decimal("1000"), Decimal("1")),
+        ),
+        "20000": (
+            (Decimal("0.2"), Decimal("0.00001")),
+            (Decimal("2"), Decimal("0.0001")),
+            (Decimal("20"), Decimal("0.001")),
+            (Decimal("200"), Decimal("0.01")),
+            (Decimal("1000"), Decimal("0.1")),
+        ),
+        "50000": (
+            (Decimal("0.5"), Decimal("0.00001")),
+            (Decimal("5"), Decimal("0.0001")),
+            (Decimal("50"), Decimal("0.001")),
+            (Decimal("500"), Decimal("0.01")),
+        ),
+        "60000": (
+            (Decimal("0.6"), Decimal("0.00001")),
+            (Decimal("6"), Decimal("0.0001")),
+            (Decimal("60"), Decimal("0.001")),
+            (Decimal("600"), Decimal("0.01")),
+            (Decimal("1000"), Decimal("0.1")),
+        ),
+        "200000": (
+            (Decimal("0.2"), Decimal("0.000001")),
+            (Decimal("2"), Decimal("0.00001")),
+            (Decimal("20"), Decimal("0.0001")),
+            (Decimal("200"), Decimal("0.001")),
+            (Decimal("1000"), Decimal("0.01")),
+        ),
+        "1200000": (
+            (Decimal("0.12"), Decimal("0.0000001")),
+            (Decimal("1.2"), Decimal("0.000001")),
+            (Decimal("12"), Decimal("0.00001")),
+            (Decimal("120"), Decimal("0.0001")),
+            (Decimal("1000"), Decimal("0.001")),
+        ),
+    }
+    COUNT_MODE_LABELS = {
+        "2000": "3½ · 2k",
+        "4000": "3¾ · 4k",
+        "20000": "4½ · 20k",
+        "50000": "4¾ · 50k",
+        "60000": "4¾ · 60k",
+        "200000": "5½ · 200k",
+        "1200000": "6½ · 1.2M",
+    }
     CAPABILITIES = {
         "dc_voltage": MeasurementCapability(
             label="DC voltage",
@@ -74,6 +135,7 @@ class MockInstrumentDriver(BaseInstrumentDriver):
 
         self.address = address
         self.profile = address.removeprefix("mock-dmm://") or "default"
+        self.count_mode = self.DEFAULT_COUNT_MODE
         self._readings = (
             cycle(custom_values)
             if custom_values is not None
@@ -135,9 +197,46 @@ class MockInstrumentDriver(BaseInstrumentDriver):
         """Return a stable simulated instrument identity."""
         return self.query("*IDN?")
 
-    def measure_dc_voltage(self) -> MeasurementResult:
+    def set_count_mode(self, count_mode: str) -> None:
+        """Select one supported simulated DMM resolution mode."""
+        if count_mode not in self.VOLTAGE_COUNT_MODES:
+            raise MeasurementError(
+                f"Unsupported Mock DMM count mode: {count_mode}."
+            )
+        self.count_mode = count_mode
+
+    def measure_dc_voltage(
+        self,
+        voltage_range: float | None = None,
+    ) -> MeasurementResult:
         """Return the next deterministic simulated DC voltage."""
-        return self._measure("dc_voltage", "Voltage DC", "V")
+        mode_ranges = self.VOLTAGE_COUNT_MODES[self.count_mode]
+        if (
+            voltage_range is not None
+            and Decimal(str(voltage_range)) not in {
+                full_scale for full_scale, _resolution in mode_ranges
+            }
+        ):
+            raise MeasurementError(
+                f"Unsupported mock DC voltage range: {voltage_range} V."
+            )
+        result = self._measure("dc_voltage", "Voltage DC", "V")
+        value = Decimal(str(result.value))
+        for full_scale, resolution in mode_ranges:
+            if (
+                voltage_range is not None
+                and full_scale == Decimal(str(voltage_range))
+                or voltage_range is None
+                and abs(value) <= full_scale
+            ):
+                return MeasurementResult(
+                    parameter=result.parameter,
+                    value=float(value.quantize(resolution, rounding=ROUND_HALF_UP)),
+                    unit=result.unit,
+                )
+        raise MeasurementError(
+            f"Voltage exceeds the simulated {self.count_mode}-count DMM range."
+        )
 
     def measure_ac_voltage(self) -> MeasurementResult:
         """Return the next deterministic simulated AC voltage."""

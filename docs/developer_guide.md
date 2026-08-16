@@ -34,6 +34,8 @@ Place new code in the application that owns its domain:
 - `dashboard` for summary and informational pages
 - `instruments` for inventory and driver operations
 - `measurements` for acquisition workflows and stored readings
+- `tasks` for persistent multi-instrument automation and Task results
+- `dmm_panel` for interactive and Task-owned instrument panels
 
 `main` remains the owner of existing database models and migrations during the
 transition. Its forms, views, services, context processor, and URL modules are

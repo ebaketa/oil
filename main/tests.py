@@ -737,7 +737,7 @@ class InstrumentInventoryTests(TestCase):
         content = response.content.decode()
 
         self.assertLess(
-            content.index(">Measurements</div>"),
+            content.index(">Instruments</div>"),
             content.index(">Status</div>"),
         )
 
@@ -1740,8 +1740,8 @@ class MeasurementListTests(TestCase):
         self.assertContains(response, 'aria-selected="true"')
         self.assertContains(response, "measurement-list.js")
 
-    def test_dashboard_measurement_card_links_and_counts(self):
-        """Dashboard measurement card links to the list and shows its count."""
+    def test_dashboard_hides_legacy_measurements_workspace(self):
+        """Legacy measurement data remains accessible but is not promoted."""
         Measurement.objects.create(
             instrument=self.instrument,
             parameter="Voltage DC",
@@ -1751,9 +1751,7 @@ class MeasurementListTests(TestCase):
 
         response = self.client.get(reverse("dashboard"))
 
-        self.assertContains(response, reverse("measurement_list"))
-        self.assertContains(response, "Measurements")
-        self.assertEqual(response.context["measurement_count"], 1)
+        self.assertNotContains(response, reverse("measurement_list"))
 
 
 class MeasurementServiceTests(TestCase):

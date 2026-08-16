@@ -3,62 +3,62 @@
 
 {% block title %}{{ instrument.name }} | DMM Panel{% endblock %}
 {% block body_class %}dmm-panel-page{% endblock %}
+{% block oil_header_page_title %}<div class="oil-header-page-title">{{ instrument.name }}</div>{% endblock %}
+{% block oil_header_page_subtitle %}{% if active_task %}<div class="small opacity-75">{{ active_task.name }}</div>{% endif %}{% endblock %}
+{% block oil_header_actions %}
+<div class="oil-page-actions oil-header-actions">
+    <a class="btn btn-sm btn-outline-light" href="{% url 'panel_list' %}">Back</a>
+</div>
+{% endblock %}
 
 {% block content %}
 <div class="dmm-panel mx-auto"
      data-measure-url="{% url 'dmm_panel_measure' instrument.pk %}"
      data-live-url="{% url 'dmm_panel_live' instrument.pk %}"
-     data-read-only="{% if busy %}true{% else %}false{% endif %}">
-    <div class="dmm-panel-header d-flex justify-content-between align-items-center">
-        <div>
-            <div class="dmm-panel-brand">{{ instrument.name }}</div>
-        </div>
-        {% if busy %}
-        <div class="dmm-read-only-info text-center px-3">
-            <strong>Read-only</strong>
-            <span aria-hidden="true"> | </span>
-            <span>{{ active_task.name }}</span>
-            <span aria-hidden="true"> | </span>
-            <span class="dmm-live-position">Task {{ active_task.pk }} · Sample —</span>
-        </div>
-        {% endif %}
-        <div class="d-flex gap-3 align-items-center">
-            <span>USB</span><span>LAN</span><span class="dmm-remote-state">REM</span><span>🔒</span>
-            <a class="btn btn-sm btn-outline-light ms-2"
-               href="{% url 'dashboard' %}">Back</a>
-        </div>
-    </div>
-
+    data-read-only="{% if busy %}true{% else %}false{% endif %}">
     <div class="dmm-display">
         <div class="dmm-reading-area">
             <div class="dmm-reading-section">
-                <div class="dmm-reading-header">
-                    <span>
-                        <span class="dmm-function-label">{{ capabilities.0.display_label|upper }}</span><span aria-hidden="true">:</span>
-                        <span class="dmm-header-range">AUTO</span>
+                <div class="dmm-reading-function">
+                    <span class="dmm-function-label">{{ capabilities.0.display_label }}</span>
+                    <span class="dmm-trigger-status">
+                        <span class="dmm-trigger-mode">{% if busy %}Auto Trigger{% else %}Manual Trigger{% endif %}</span>
+                        <span class="dmm-trigger-indicator" aria-label="Trigger activity">
+                            <span class="dmm-trigger-light" aria-hidden="true"></span>
+                        </span>
                     </span>
+                    <span class="dmm-sample-position">Sample: —</span>
                 </div>
                 <div class="dmm-reading-row">
-                    <span class="dmm-reading">—</span>
-                    <span class="dmm-unit">{{ capabilities.0.unit }}</span>
+                    <span class="dmm-reading-value">
+                        <span class="dmm-reading">—</span>
+                    </span>
+                </div>
+                <div class="dmm-reading-footer">
+                    <span class="dmm-header-range">AUTO</span>
+                    <span class="dmm-read-only-info">
+                        {% if busy %}<span class="dmm-live-position">Task {{ active_task.pk }}</span>{% endif %}
+                    </span>
+                    <span class="dmm-unit">{{ capabilities.0.display_unit }}</span>
                 </div>
                 <div class="dmm-reading-details small">
-                    <div class="dmm-detail-column">
-                        <div>Range: <span class="dmm-range">AUTO</span></div>
-                        <div>Min: <span class="dmm-min">—</span></div>
+                    <div class="dmm-detail-column dmm-detail-input">
+                        <div>MIN: <span class="dmm-min">—</span></div>
                     </div>
-                    <div class="dmm-detail-column">
-                        <div>NPLC: <span>—</span></div>
-                        <div>Max: <span class="dmm-max">—</span></div>
+                    <div class="dmm-detail-column dmm-detail-statistics">
+                        <div>MAX: <span class="dmm-max">—</span></div>
                     </div>
-                    <div class="dmm-detail-column">
-                        <div>Input: <span>FRONT</span></div>
-                        <div>Avg: <span class="dmm-average">—</span></div>
+                    <div class="dmm-detail-column dmm-detail-range">
+                        <div>AVG: <span class="dmm-average">—</span></div>
                     </div>
                 </div>
             </div>
             <div class="dmm-live-chart" aria-label="Live measurement graph">
                 <canvas class="dmm-chart-canvas"></canvas>
+                <div class="dmm-chart-controls d-flex justify-content-end gap-2">
+                    <button class="btn btn-sm btn-outline-light dmm-chart-zoom-in" type="button">Zoom in</button>
+                    <button class="btn btn-sm btn-outline-light dmm-chart-zoom-out" type="button">Zoom out</button>
+                </div>
             </div>
         </div>
     </div>
@@ -73,18 +73,24 @@
                             data-label="{{ capability.label }}"
                             data-display-label="{{ capability.display_label }}"
                             data-unit="{{ capability.unit }}"
-                            {% if busy %}disabled{% endif %}>{{ capability.label }}</button>
+                            data-display-unit="{{ capability.display_unit }}"
+                            data-autorange="{% if capability.autorange %}true{% else %}false{% endif %}"
+                            data-ranges="{{ capability.range_values }}"
+                            {% if busy or not capability.available %}disabled{% endif %}>{{ capability.button_label }}</button>
                 {% endfor %}
             </div>
         </div>
         <div class="col-lg-4 dmm-control-bank">
-            <div class="d-grid gap-2">
-                <button class="btn btn-outline-light" type="button" disabled>Auto Range</button>
-                <div class="btn-group"><button class="btn btn-outline-light" disabled>Range +</button><button class="btn btn-outline-light" disabled>Range −</button></div>
+            <div class="btn-group" role="group" aria-label="Measurement range controls">
+                <button class="btn btn-outline-light dmm-auto-range" type="button" disabled>Auto Range</button>
+                <button class="btn btn-outline-light dmm-range-up" type="button" disabled>Range +</button>
+                <button class="btn btn-outline-light dmm-range-down" type="button" disabled>Range −</button>
             </div>
         </div>
         <div class="col-lg-8 dmm-control-bank">
             <div class="d-flex flex-wrap gap-2">
+                <button class="btn btn-outline-light dmm-resolution" type="button"
+                        {% if not count_modes %}disabled{% endif %}>Resolution 4¾ · 50k</button>
                 <button class="btn btn-outline-light" disabled>Null</button>
                 <button class="btn btn-outline-light dmm-hold" type="button" {% if busy %}disabled{% endif %}>Hold</button>
                 <button class="btn btn-outline-light dmm-reset-stats" type="button" {% if busy %}disabled{% endif %}>Min/Max</button>
@@ -92,14 +98,16 @@
             </div>
         </div>
         <div class="col-lg-4 dmm-control-bank">
-            <div class="d-grid gap-2">
+            <div class="btn-group" role="group" aria-label="Trigger controls">
                 <button class="btn btn-light dmm-trigger" type="button" {% if busy %}disabled{% endif %}>Trigger</button>
                 <button class="btn btn-outline-light dmm-continuous" type="button" {% if busy %}disabled{% endif %}>Continuous</button>
-                <a class="btn btn-outline-light" href="{% url 'dashboard' %}">Local / Back</a>
+                <a class="btn btn-outline-light" href="{% url 'dashboard' %}">Local</a>
             </div>
         </div>
     </div>
 </div>
 {% csrf_token %}
-<script src="{% static 'dmm_panel/panel.js' %}?v=19"></script>
+{{ count_modes|json_script:"dmm-count-modes" }}
+{{ count_mode_labels|json_script:"dmm-count-mode-labels" }}
+<script src="{% static 'dmm_panel/panel.js' %}?v=62"></script>
 {% endblock %}

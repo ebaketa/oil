@@ -5,14 +5,10 @@
 Dashboard
 {% endblock %}
 {% block body_class %}dashboard-page{% endblock %}
+{% block oil_header_page_title %}<div class="oil-header-page-title">Dashboard</div>{% endblock %}
+{% block oil_header_page_subtitle %}<div class="small opacity-75">Monitor tasks, instruments, and measurement activity</div>{% endblock %}
 
 {% block content %}
-
-<div class="oil-page-header">
-    <div class="oil-page-header-main">
-        <h2>Dashboard</h2>
-    </div>
-</div>
 
 <div class="row g-3">
     <div class="col-sm-6 col-xl-3">
@@ -50,16 +46,6 @@ Dashboard
                 <div class="card-body">
                     <div class="oil-dashboard-card-title">Instruments</div>
                     <div class="display-6">{{ instrument_count }}</div>
-                </div>
-            </div>
-        </a>
-    </div>
-    <div class="col-sm-6 col-xl-3">
-        <a class="text-decoration-none text-body" href="{% url 'measurement_list' %}">
-            <div class="card oil-dashboard-card">
-                <div class="card-body">
-                    <div class="oil-dashboard-card-title">Measurements</div>
-                    <div class="display-6">{{ measurement_count }}</div>
                 </div>
             </div>
         </a>
