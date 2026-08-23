@@ -399,6 +399,7 @@ header.card-header.oil-theme-bg {
 }
 
 .dmm-panel {
+    container: dmm-panel / inline-size;
     width: 100%;
     color: var(--oil-text);
     background: var(--oil-panel-bg);
@@ -492,8 +493,8 @@ body.dmm-panel-page {
 .dmm-sample-position { text-align: right; }
 .dmm-reading-row { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; justify-content: center; overflow: hidden; }
 .dmm-reading-value { display: flex; min-width: 0; align-items: baseline; }
-.dmm-reading { display: inline-flex; align-items: center; font-family: "Roboto Condensed", "Arial Narrow", Arial, sans-serif; font-size: 6rem; font-stretch: condensed; font-weight: 300; line-height: 1; white-space: nowrap; }
-.dmm-sign { font-size: 64px; line-height: 1; }
+.dmm-reading { display: inline-flex; align-items: center; font-family: "Roboto Condensed", "Arial Narrow", Arial, sans-serif; font-size: 6rem; font-stretch: condensed; font-weight: 400; line-height: 1; white-space: nowrap; }
+.dmm-sign { font-size: 0.6667em; line-height: 1; }
 .dmm-digit-gap { display: inline-block; width: 0.5ch; }
 .dmm-unit { font-size: 3rem; line-height: 1; }
 .dmm-reading-footer { display: grid; min-height: 3rem; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: baseline; font-size: 1rem; }
@@ -543,13 +544,40 @@ body.dmm-panel-page {
     .dmm-controls .btn { --bs-btn-padding-y: 0.2rem; }
 }
 
-@media (max-width: 991.98px) {
-    .dmm-reading-area { grid-template-columns: 1fr; }
-    .dmm-live-chart { min-height: 6rem; margin-top: 0.75rem; margin-left: 0; border-top: 1px solid #31402f; border-left: 0; }
+@container dmm-panel (max-width: 799px) {
+    .dmm-display {
+        max-height: none;
+        flex: 0 0 auto;
+    }
+
+    .dmm-reading-area {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto minmax(180px, 1fr);
+    }
+
+    .dmm-reading-section {
+        min-height: 240px;
+    }
+
+    .dmm-live-chart {
+        min-height: 180px;
+        margin-top: 0.75rem;
+        margin-left: 0;
+        border-top: 1px solid var(--oil-panel-line);
+        border-left: 0;
+    }
 
     .dmm-controls > .dmm-control-bank {
-        width: 50%;
-        border-right: 1px solid #59616a;
+        width: 100%;
+        border-right: 0;
+    }
+}
+
+@media (max-width: 799px) {
+    body.dmm-panel-page {
+        height: auto;
+        min-height: 100vh;
+        overflow-y: auto;
     }
 }
 

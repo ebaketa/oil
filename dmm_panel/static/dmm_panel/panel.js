@@ -37,6 +37,9 @@
     let displayDecimals = 3;
     let chartStatistics = null;
     let chartZoom = 1;
+    let chartScaleMode = "full";
+    let fittedReadingWidth = null;
+    let fittedReadingFontSize = 96;
     let taskVoltageRanges = countModes[selectedCountMode] || null;
     let readOnlyResolutionOverride = false;
     const readOnly = panel.dataset.readOnly === "true";
@@ -106,7 +109,34 @@
         const row = panel.querySelector(".dmm-reading-row");
         if (!row || !reading) return;
         row.style.paddingInline = "0";
-        reading.style.fontSize = "96px";
+        const availableWidth = Math.max(0, row.clientWidth - 16);
+        if (panel.getBoundingClientRect().width > 799) {
+            fittedReadingWidth = availableWidth;
+            fittedReadingFontSize = 96;
+            reading.style.fontSize = "96px";
+            if (unit) unit.style.fontSize = "48px";
+            return;
+        }
+        if (
+            fittedReadingWidth === null
+            || Math.abs(fittedReadingWidth - availableWidth) > 1
+        ) {
+            fittedReadingWidth = availableWidth;
+            fittedReadingFontSize = 96;
+        }
+        reading.style.fontSize = `${fittedReadingFontSize}px`;
+        if (unit) unit.style.fontSize = `${fittedReadingFontSize / 2}px`;
+        const readingWidth = reading.getBoundingClientRect().width;
+        if (readingWidth > availableWidth && readingWidth > 0) {
+            fittedReadingFontSize = Math.max(
+                48,
+                Math.floor(
+                    fittedReadingFontSize * availableWidth / readingWidth,
+                ),
+            );
+            reading.style.fontSize = `${fittedReadingFontSize}px`;
+            if (unit) unit.style.fontSize = `${fittedReadingFontSize / 2}px`;
+        }
     };
 
     const drawChart = () => {
@@ -158,16 +188,33 @@
             ? Math.round(visibleAverage / voltageDivision) * voltageDivision
             : average;
         const voltageHalfSpan = voltageDivision * 10;
-        const baseMinimum = isVoltage
-            ? chartCenter - voltageHalfSpan
-            : statisticMinimum - rangePadding;
-        const baseMaximum = isVoltage
-            ? chartCenter + voltageHalfSpan
-            : statisticMaximum + rangePadding;
-        const baseHalfSpan = (baseMaximum - baseMinimum) / 2;
-        const halfSpan = Math.max(Number.EPSILON, baseHalfSpan * chartZoom);
-        const minimum = chartCenter - halfSpan;
-        const maximum = chartCenter + halfSpan;
+        const visibleMinimum = Math.min(...visible);
+        const visibleMaximum = Math.max(...visible);
+        const voltagePadding = Math.max(
+            Math.max(Math.abs(visibleMinimum), Math.abs(visibleMaximum)) * 0.1,
+            displayResolution * 2,
+        );
+        const useFullScale = isVoltage && chartScaleMode === "full";
+        const baseMinimum = useFullScale
+            ? (visibleMaximum < 0 ? visibleMinimum - voltagePadding : 0)
+            : (isVoltage
+                ? chartCenter - voltageHalfSpan
+                : statisticMinimum - rangePadding);
+        const baseMaximum = useFullScale
+            ? (visibleMaximum < 0 ? 0 : visibleMaximum + voltagePadding)
+            : (isVoltage
+                ? chartCenter + voltageHalfSpan
+                : statisticMaximum + rangePadding);
+        const baseSpan = Math.max(
+            Number.EPSILON,
+            baseMaximum - baseMinimum,
+        );
+        const minimum = useFullScale
+            ? (baseMinimum < 0 ? baseMinimum * chartZoom : 0)
+            : chartCenter - (baseSpan / 2) * chartZoom;
+        const maximum = useFullScale
+            ? (baseMaximum > 0 ? baseMaximum * chartZoom : 0)
+            : chartCenter + (baseSpan / 2) * chartZoom;
         const guideMinimum = isVoltage ? minimum : statisticMinimum;
         const guideMaximum = isVoltage ? maximum : statisticMaximum;
         const inset = 10;
@@ -241,6 +288,10 @@
     };
 
     const fitPanelToViewport = () => {
+        if (panel.getBoundingClientRect().width <= 799) {
+            panel.style.height = "auto";
+            return;
+        }
         const top = panel.getBoundingClientRect().top;
         const footer = document.querySelector("body > .card > footer");
         const footerHeight = footer?.getBoundingClientRect().height || 0;
@@ -456,6 +507,21 @@
         chartStatistics = null;
         drawChart();
         [".dmm-min", ".dmm-max", ".dmm-average"].forEach((selector) => panel.querySelector(selector).textContent = "—");
+    });
+    const fullScaleButton = panel.querySelector(".dmm-chart-full-scale");
+    const detailsButton = panel.querySelector(".dmm-chart-details");
+    const selectChartScaleMode = (mode) => {
+        chartScaleMode = mode;
+        chartZoom = 1;
+        fullScaleButton?.classList.toggle("active", mode === "full");
+        detailsButton?.classList.toggle("active", mode === "details");
+        drawChart();
+    };
+    fullScaleButton?.addEventListener("click", () => {
+        selectChartScaleMode("full");
+    });
+    detailsButton?.addEventListener("click", () => {
+        selectChartScaleMode("details");
     });
     panel.querySelector(".dmm-chart-zoom-in")?.addEventListener("click", () => {
         chartZoom = Math.max(1 / 32, chartZoom / 2);

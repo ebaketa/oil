@@ -56,6 +56,8 @@
             <div class="dmm-live-chart" aria-label="Live measurement graph">
                 <canvas class="dmm-chart-canvas"></canvas>
                 <div class="dmm-chart-controls d-flex justify-content-end gap-2">
+                    <button class="btn btn-sm btn-outline-light dmm-chart-full-scale active" type="button">Full Scale</button>
+                    <button class="btn btn-sm btn-outline-light dmm-chart-details" type="button">Details</button>
                     <button class="btn btn-sm btn-outline-light dmm-chart-zoom-in" type="button">Zoom in</button>
                     <button class="btn btn-sm btn-outline-light dmm-chart-zoom-out" type="button">Zoom out</button>
                 </div>
@@ -109,5 +111,5 @@
 {% csrf_token %}
 {{ count_modes|json_script:"dmm-count-modes" }}
 {{ count_mode_labels|json_script:"dmm-count-mode-labels" }}
-<script src="{% static 'dmm_panel/panel.js' %}?v=62"></script>
+<script src="{% static 'dmm_panel/panel.js' %}?v=68"></script>
 {% endblock %}
