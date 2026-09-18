@@ -183,6 +183,12 @@ def _reading_decimal_places(reading):
 def panel(request, pk):
     """Render one instrument as a virtual DMM front panel."""
     instrument = _dmm_or_404(pk)
+    if instrument.driver == Instrument.Driver.BTDL_BMX280:
+        return render(
+            request,
+            "panels/bmx280.html",
+            {"instrument": instrument, "busy": _active_task(instrument)},
+        )
     active_task = _active_task(instrument)
     display_labels = {
         "dc_voltage": "DC Voltage",
@@ -218,6 +224,8 @@ def panel(request, pk):
         ("continuity", "Cont )))"),
         ("diode", "Diode"),
     )
+
+
     function_buttons = (
         agilent_34401a_function_buttons
         if instrument.driver == Instrument.Driver.AGILENT_34401A
@@ -286,6 +294,48 @@ def panel(request, pk):
             "supports_nplc_control": (
                 instrument.driver == Instrument.Driver.AGILENT_34401A
             ),
+        },
+    )
+
+
+@login_required
+@require_GET
+def bmx280_measure(request, pk):
+    """Read all currently available BMx280 environmental values once."""
+    instrument = get_object_or_404(
+        Instrument,
+        pk=pk,
+        driver=Instrument.Driver.BTDL_BMX280,
+    )
+    if _is_busy(instrument):
+        return JsonResponse(
+            {"error": "Instrument is in use by an active task."},
+            status=409,
+        )
+    try:
+        with ConnectionManager.session(instrument) as driver:
+            sensors = driver.sensor_inventory()
+            measurements = [
+                f"{quantity}_{sensor['channel']}"
+                for sensor in sensors
+                for quantity in sensor["quantities"]
+            ]
+            results = driver.measure_environment(measurements)
+    except Exception as exc:
+        return JsonResponse(
+            {"error": str(exc) or exc.__class__.__name__},
+            status=503,
+        )
+    return JsonResponse(
+        {
+            "readings": [
+                {
+                    "parameter": result.parameter,
+                    "value": result.value,
+                    "unit": result.unit,
+                }
+                for result in results
+            ],
         },
     )
 
