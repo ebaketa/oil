@@ -13,10 +13,23 @@ db.sqlite3
 db.sqlite3-journal
 db.sqlite3-shm
 db.sqlite3-wal
+*.sqlite3.backup*
+*.sqlite3-*
+*.db.backup*
 *.log
 media/
 staticfiles/
 site/
+
+# Local conversation exports and development snapshots
+.codex/
+.agents/
+conversation*/
+conversations/
+*_conversation.*
+*_chat.*
+*_snapshot.*
+*.patch
 
 # Environment variables and secrets
 .env
