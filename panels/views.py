@@ -189,6 +189,20 @@ def panel(request, pk):
             "panels/bmx280.html",
             {"instrument": instrument, "busy": _active_task(instrument)},
         )
+    if instrument.driver not in {
+        Instrument.Driver.AGILENT_34401A,
+        Instrument.Driver.KEYSIGHT_34461A,
+        Instrument.Driver.MOCK,
+    }:
+        return render(
+            request,
+            "panels/generic.html",
+            {
+                "instrument": instrument,
+                "capabilities": instrument.capabilities,
+                "busy": _active_task(instrument),
+            },
+        )
     active_task = _active_task(instrument)
     display_labels = {
         "dc_voltage": "DC Voltage",
@@ -338,6 +352,34 @@ def bmx280_measure(request, pk):
             ],
         },
     )
+
+
+@login_required
+@require_GET
+def generic_measure(request, pk):
+    """Read all capabilities exposed by a non-DMM instrument."""
+    instrument = get_object_or_404(Instrument, pk=pk)
+    if instrument.driver in {
+        Instrument.Driver.AGILENT_34401A,
+        Instrument.Driver.KEYSIGHT_34461A,
+        Instrument.Driver.MOCK,
+        Instrument.Driver.BTDL_BMX280,
+    }:
+        return JsonResponse({"error": "Use the instrument-specific panel."}, status=400)
+    if _is_busy(instrument):
+        return JsonResponse({"error": "Instrument is in use by an active task."}, status=409)
+    try:
+        with ConnectionManager.session(instrument) as driver:
+            results = []
+            for function in instrument.capabilities:
+                result = getattr(driver, f"measure_{function}")()
+                results.extend(result if isinstance(result, (tuple, list)) else (result,))
+    except Exception as exc:
+        return JsonResponse({"error": str(exc) or exc.__class__.__name__}, status=503)
+    return JsonResponse({"readings": [
+        {"parameter": item.parameter, "value": item.value, "unit": item.unit}
+        for item in results
+    ]})
 
 
 @login_required

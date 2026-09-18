@@ -1,0 +1,16 @@
+{% extends "main/base.html" %}
+{% load static %}
+{% block title %}{{ instrument.name }} | Instrument Panel{% endblock %}
+{% block body_class %}workspace-page{% endblock %}
+{% block oil_header_page_title %}<div class="oil-header-page-title">{{ instrument.name }}</div>{% endblock %}
+{% block oil_header_actions %}<div class="oil-page-actions oil-header-actions"><a class="btn btn-sm btn-outline-light" href="{% url 'panel_list' %}">Back</a></div>{% endblock %}
+{% block content %}
+<section class="card mx-auto" style="max-width: 900px" data-generic-panel data-measure-url="{% url 'generic_panel_measure' instrument.pk %}">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-3"><div><h1 class="h4 mb-1">{{ instrument.name }}</h1><div class="text-muted">{{ instrument.manufacturer }} {{ instrument.model_name }}</div></div><span class="badge text-bg-secondary" data-generic-state>{% if busy %}In use{% else %}Ready{% endif %}</span></div>
+    <div class="row g-3" data-generic-readings><p class="text-muted">Reading instrument…</p></div>
+    <div class="small text-muted mt-3" data-generic-error></div>
+  </div>
+</section>
+<script src="{% static 'panels/generic.js' %}?v=1"></script>
+{% endblock %}

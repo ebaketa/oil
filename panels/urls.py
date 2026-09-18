@@ -13,4 +13,5 @@ urlpatterns = [
     path("dmm/<int:pk>/measure/", views.measure, name="dmm_panel_measure"),
     path("dmm/<int:pk>/live/", views.live_reading, name="dmm_panel_live"),
     path("bmx280/<int:pk>/measure/", views.bmx280_measure, name="bmx280_measure"),
+    path("instrument/<int:pk>/measure/", views.generic_measure, name="generic_panel_measure"),
 ]
