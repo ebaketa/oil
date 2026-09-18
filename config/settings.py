@@ -68,7 +68,7 @@ INSTALLED_APPS = [
     'api',
     'accounts',
     'dashboard',
-    'dmm_panel',
+    'panels',
     'tasks',
     'instruments',
     'measurements',

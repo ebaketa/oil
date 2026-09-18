@@ -69,7 +69,7 @@ class DmmPanelTests(TestCase):
         }
 
         with patch(
-            "dmm_panel.views.ConnectionManager.persistent_session",
+            "panels.views.ConnectionManager.persistent_session",
         ) as session:
             session.return_value.__enter__.return_value = driver
             response = self.client.get(
@@ -126,7 +126,7 @@ class DmmPanelTests(TestCase):
         url = reverse("dmm_panel_status", args=[instrument.pk])
 
         with patch(
-            "dmm_panel.views.ConnectionManager.persistent_session",
+            "panels.views.ConnectionManager.persistent_session",
         ) as session:
             session.return_value.__enter__.return_value = driver
             owner_response = self.client.get(
@@ -160,7 +160,7 @@ class DmmPanelTests(TestCase):
             last_seen=timezone.now(),
         )
 
-        with patch("dmm_panel.views.ConnectionManager.session") as session:
+        with patch("panels.views.ConnectionManager.session") as session:
             session.return_value.__enter__.return_value = driver
             response = self.client.post(
                 reverse("dmm_panel_resolution", args=[instrument.pk]),
@@ -199,7 +199,7 @@ class DmmPanelTests(TestCase):
             last_seen=timezone.now(),
         )
 
-        with patch("dmm_panel.views.ConnectionManager.session") as session:
+        with patch("panels.views.ConnectionManager.session") as session:
             session.return_value.__enter__.return_value = driver
             response = self.client.post(
                 reverse("dmm_panel_nplc", args=[instrument.pk]),
@@ -237,7 +237,7 @@ class DmmPanelTests(TestCase):
         driver = MagicMock()
         driver.measure_ac_voltage.side_effect = RuntimeError("ACV failed")
 
-        with patch("dmm_panel.views.ConnectionManager.session") as session:
+        with patch("panels.views.ConnectionManager.session") as session:
             session.return_value.__enter__.return_value = driver
             response = self.client.post(
                 reverse("dmm_panel_measure", args=[instrument.pk]),
@@ -270,7 +270,7 @@ class DmmPanelTests(TestCase):
         driver.clear_error_queue.return_value = ('-113,"Undefined header"',)
 
         with patch(
-            "dmm_panel.views.ConnectionManager.persistent_session",
+            "panels.views.ConnectionManager.persistent_session",
         ) as session:
             session.return_value.__enter__.return_value = driver
             response = self.client.post(
@@ -304,7 +304,7 @@ class DmmPanelTests(TestCase):
         driver.drain_command_log.return_value = ["*CLS"]
 
         with patch(
-            "dmm_panel.views.ConnectionManager.persistent_session",
+            "panels.views.ConnectionManager.persistent_session",
         ) as session:
             session.return_value.__enter__.return_value = driver
             response = self.client.post(

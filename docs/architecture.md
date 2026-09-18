@@ -21,7 +21,7 @@ Browser → Views → Services → ConnectionManager → Drivers → Instrument
 - `tasks` owns persistent multi-instrument automation configuration, background
   execution, synchronized samples, generic readings, live charts, and Task CSV
   export.
-- `dmm_panel` provides responsive local and read-only live front panels for
+- `panels` provides responsive local and read-only live front panels for
   registered measurement instruments.
 - `main` is the transitional database and compatibility application. It retains
   the existing models and migration history so application decomposition does

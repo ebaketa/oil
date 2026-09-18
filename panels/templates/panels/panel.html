@@ -140,5 +140,5 @@
 {% csrf_token %}
 {{ count_modes|json_script:"dmm-count-modes" }}
 {{ count_mode_labels|json_script:"dmm-count-mode-labels" }}
-<script src="{% static 'dmm_panel/panel.js' %}?v=96"></script>
+<script src="{% static 'panels/panel.js' %}?v=96"></script>
 {% endblock %}

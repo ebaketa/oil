@@ -114,7 +114,7 @@ def panel_list(request):
     )
     return render(
         request,
-        "dmm_panel/panel_list.html",
+        "panels/panel_list.html",
         {
             "panel_instruments": instruments,
             "active_panel_count": active_panel_count,
@@ -266,7 +266,7 @@ def panel(request, pk):
     )
     return render(
         request,
-        "dmm_panel/panel.html",
+        "panels/panel.html",
         {
             "instrument": instrument,
             "capabilities": capabilities,
