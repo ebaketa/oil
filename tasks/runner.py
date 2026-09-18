@@ -10,6 +10,8 @@ from threading import Event, Lock
 from django.db import close_old_connections
 from django.utils import timezone
 
+from main.models import Instrument
+from drivers.exceptions import CommunicationError
 from services.connection_manager import ConnectionManager
 
 from .bench import VirtualMockBench
@@ -74,7 +76,17 @@ def _read_instrument_group(assignments, drivers):
     for assignment in assignments:
         function = assignment.configuration["function"]
         driver = drivers[assignment.instrument_id]
-        readings[assignment.pk] = getattr(driver, f"measure_{function}")()
+        if function == "environment" and assignment.instrument.driver == (
+            Instrument.Driver.BTDL_BMX280
+        ):
+            readings[assignment.pk] = driver.measure_environment(
+                assignment.configuration.get("measurements"),
+            )
+        else:
+            readings[assignment.pk] = getattr(
+                driver,
+                f"measure_{function}",
+            )()
     return readings
 
 
@@ -88,6 +100,24 @@ def _mark_sample_failed(sample, acquisition_started, exc):
     sample.save(
         update_fields=("status", "error", "acquisition_time_seconds"),
     )
+
+
+def _read_supply_voltage_with_retry(supply, attempts=2):
+    """Retry a transient PSU readback timeout before failing one sample."""
+    last_error = None
+    for attempt in range(attempts):
+        try:
+            return supply.measure_output_voltage()
+        except CommunicationError as exc:
+            last_error = exc
+            if attempt + 1 < attempts:
+                transport = getattr(supply, "transport", None)
+                if transport is not None and transport.is_open:
+                    transport.reset_input_buffer()
+    raise CommunicationError(
+        f"Power supply output voltage readback failed after {attempts} "
+        f"attempts: {last_error}"
+    ) from last_error
 
 
 def run_automation_task(
@@ -212,6 +242,20 @@ def run_automation_task(
                             VirtualMockBench.DEFAULT_COUNT_MODE,
                         ),
                     )
+                if (
+                    assignment.instrument.driver
+                    == Instrument.Driver.BTDL_DS18B20
+                    and assignment.configuration.get("function")
+                    in {"temperature_ds18b20", "temperatures"}
+                ):
+                    driver.set_ds18b20_resolution(
+                        int(
+                            assignment.configuration.get(
+                                "ds18b20_resolution_bits",
+                                12,
+                            ),
+                        ),
+                    )
                 if assignment.configuration.get("display_off", False):
                     stack.callback(driver.set_display_enabled, True)
                     driver.set_display_enabled(False)
@@ -219,6 +263,19 @@ def run_automation_task(
                 function = assignment.configuration.get("function")
                 if prepare is not None and function:
                     prepare(function)
+                set_resolution = getattr(driver, "set_resolution", None)
+                resolution = assignment.configuration.get("resolution")
+                if (
+                    assignment.instrument.driver in {
+                        Instrument.Driver.AGILENT_34401A,
+                        Instrument.Driver.KEYSIGHT_34461A,
+                    }
+                    and function in {"dc_voltage", "resistance"}
+                    and resolution not in {"4.5", "5.5", "6.5"}
+                ):
+                    resolution = "5.5"
+                if set_resolution is not None and function and resolution:
+                    set_resolution(function, resolution)
             supply_id = (
                 supply_assignment.instrument_id
                 if supply_assignment
@@ -349,12 +406,23 @@ def run_automation_task(
                                 "readback_voltage",
                                 False,
                             ):
+                                try:
+                                    output_voltage = (
+                                        _read_supply_voltage_with_retry(supply)
+                                    )
+                                except CommunicationError as exc:
+                                    _mark_sample_failed(
+                                        sample,
+                                        acquisition_started,
+                                        exc,
+                                    )
+                                    break
                                 TaskReading.objects.create(
                                     sample=sample,
                                     task_instrument=assignment,
                                     parameter="Output voltage readback",
                                     value=Decimal(
-                                        str(supply.measure_output_voltage()),
+                                        str(output_voltage),
                                     ),
                                     unit="V",
                                 )
@@ -391,11 +459,22 @@ def run_automation_task(
                                 measured_voltage = value
                         else:
                             result = physical_results[assignment.pk]
-                            value = Decimal(str(result.value))
-                            parameter = result.parameter
-                            unit = result.unit
+                            results = (
+                                result
+                                if isinstance(result, (tuple, list))
+                                else (result,)
+                            )
+                            for measured_result in results:
+                                TaskReading.objects.create(
+                                    sample=sample,
+                                    task_instrument=assignment,
+                                    parameter=measured_result.parameter,
+                                    value=Decimal(str(measured_result.value)),
+                                    unit=measured_result.unit,
+                                )
                             if function == "dc_voltage" and measured_voltage is None:
-                                measured_voltage = value
+                                measured_voltage = Decimal(str(results[0].value))
+                            continue
                         TaskReading.objects.create(
                             sample=sample,
                             task_instrument=assignment,
@@ -403,6 +482,8 @@ def run_automation_task(
                             value=value,
                             unit=unit,
                         )
+                    if sample.status == TaskSample.Status.FAILED:
+                        continue
                 elif task.voltage_meter_id:
                     if (
                         task.voltage_source

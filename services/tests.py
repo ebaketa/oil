@@ -79,6 +79,18 @@ class ConnectionManagerTests(SimpleTestCase):
         self.assertTrue(ConnectionManager.is_connected(self.instrument))
 
     @patch("services.connection_manager.create_driver")
+    def test_persistent_session_keeps_new_panel_connection_open(self, factory):
+        """Panel polling reuses one connection until explicit release."""
+        driver = self.connected_driver()
+        factory.return_value = driver
+
+        with ConnectionManager.persistent_session(self.instrument) as active:
+            self.assertIs(active, driver)
+
+        driver.disconnect.assert_not_called()
+        self.assertTrue(ConnectionManager.is_connected(self.instrument))
+
+    @patch("services.connection_manager.create_driver")
     def test_temporary_session_replaces_and_closes_existing_connection(
         self,
         factory,

@@ -14,6 +14,8 @@ class TasksConfig(AppConfig):
 
     def ready(self):
         """Resume interrupted workers only in the designated server process."""
+        from . import signals  # noqa: F401
+
         if os.environ.get("OIL_RECOVER_TASKS") != "1":
             return
         from .runner import TaskRunner

@@ -11,11 +11,13 @@ from django.db import transaction
 from django.db.models import Count, Max, Min, Q
 from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_GET, require_POST
 
 from instruments.models import Instrument
 from measurements.exports import safe_spreadsheet_text
+from services.connection_manager import ConnectionManager
 
 from .forms import TaskBuilderForm
 from .bench import VirtualMockBench
@@ -30,12 +32,62 @@ class CsvEcho:
         return value
 
 
+BMX280_MEASUREMENTS = {
+    "temperature_1": ("Temperature channel 1", "T CH1", "°C", 2),
+    "pressure_1": ("Pressure channel 1", "P CH1", "hPa", 4),
+    "humidity_1": ("Humidity channel 1", "RH CH1", "%RH", 2),
+    "temperature_2": ("Temperature channel 2", "T CH2", "°C", 2),
+    "pressure_2": ("Pressure channel 2", "P CH2", "hPa", 4),
+    "humidity_2": ("Humidity channel 2", "RH CH2", "%RH", 2),
+}
+
+
+def _bmx280_column_label(measurement, configuration, instrument_name):
+    """Build a human label from the detected sensor type, not its channel."""
+    _quantity, raw_channel = measurement.rsplit("_", 1)
+    parameter, fallback, _unit, _decimals = BMX280_MEASUREMENTS[measurement]
+    sensor_types = configuration.get("sensor_types", {})
+    sensor_type = sensor_types.get(raw_channel)
+    if sensor_type not in {"BMP280", "BME280"}:
+        return f"{instrument_name} — {fallback}"
+    duplicate = list(sensor_types.values()).count(sensor_type) > 1
+    sensor_name = f"{instrument_name} {sensor_type}"
+    if duplicate:
+        sensor_name += f" {BTDL_BMX280_ADDRESSES[raw_channel]}"
+    quantity_label = parameter.rsplit(" channel ", 1)[0]
+    return f"{sensor_name} — {quantity_label}"
+
+
+BTDL_BMX280_ADDRESSES = {"1": "0x76", "2": "0x77"}
+CHART_AXES = ("primary", "secondary", "axis3", "axis4", "axis5")
+
+
 def _voltage_decimal_places(instrument):
     """Return the voltage precision published by a power-supply driver."""
     limits = instrument.power_supply_voltage_limits
     if limits is None:
         return None
     return max(0, -limits["step"].as_tuple().exponent)
+
+
+def _measurement_decimal_places(instrument, configuration):
+    """Return the configured display precision for one task instrument."""
+    function = configuration.get("function")
+    if instrument.driver == Instrument.Driver.BTDL_NTC:
+        return 1
+    if instrument.driver == Instrument.Driver.BTDL_DS18B20:
+        if function == "temperature_ds1820":
+            return 1
+        if function == "temperature_ds18b20":
+            return 1
+    if instrument.driver == Instrument.Driver.BTDL_BMX280:
+        if function.startswith(("temperature_", "humidity_")):
+            return 2
+        if function.startswith("pressure_"):
+            return 4
+    if instrument.driver == Instrument.Driver.RPI_CPU_TEMPERATURE:
+        return 2
+    return _voltage_decimal_places(instrument)
 
 
 def _serialize_task(task, *, include_samples=False, samples_queryset=None):
@@ -53,6 +105,10 @@ def _serialize_task(task, *, include_samples=False, samples_queryset=None):
             "configuration": assignment.configuration,
             "voltage_decimals": _voltage_decimal_places(
                 assignment.instrument,
+            ),
+            "display_decimals": _measurement_decimal_places(
+                assignment.instrument,
+                assignment.configuration,
             ),
         }
         for assignment in task_instruments
@@ -74,6 +130,10 @@ def _serialize_task(task, *, include_samples=False, samples_queryset=None):
                         "configuration": {},
                         "voltage_decimals": _voltage_decimal_places(
                             instrument,
+                        ),
+                        "display_decimals": _measurement_decimal_places(
+                            instrument,
+                            {},
                         ),
                     },
                 )
@@ -100,13 +160,67 @@ def _serialize_task(task, *, include_samples=False, samples_queryset=None):
                     },
                 ),
             )
+        elif configuration.get("function") == "temperatures" and instrument[
+            "driver_name"
+        ] == Instrument.Driver.BTDL_DS18B20:
+            for parameter, short_label in (
+                ("Temperature DS1820/DS18S20", "DS1820"),
+                ("Temperature DS18B20", "DS18B20"),
+            ):
+                result_columns.append(
+                    {
+                        "assignment_id": instrument["assignment_id"],
+                        "parameter": parameter,
+                        "label": f'{instrument["name"]} — {short_label}',
+                        "decimals": 1,
+                        "axis": configuration.get("chart_axis", "primary"),
+                    },
+                )
+        elif configuration.get("function") == "environment" and instrument[
+            "driver_name"
+        ] == Instrument.Driver.BTDL_BMX280:
+            for measurement in configuration.get("measurements", ()):
+                metadata = BMX280_MEASUREMENTS.get(measurement)
+                if metadata is None:
+                    continue
+                parameter, _short_label, _unit, decimals = metadata
+                result_columns.append(
+                    {
+                        "assignment_id": instrument["assignment_id"],
+                        "parameter": parameter,
+                        "label": _bmx280_column_label(
+                            measurement,
+                            configuration,
+                            instrument["name"],
+                        ),
+                        "decimals": decimals,
+                        "axis": configuration.get("measurement_axes", {}).get(
+                            measurement,
+                            configuration.get("chart_axis", "primary"),
+                        ),
+                    },
+                )
+        elif configuration.get("function") == "temperatures" and instrument[
+            "driver_name"
+        ] == Instrument.Driver.BTDL_BMX280:
+            for channel in (1, 2):
+                parameter = f"Temperature channel {channel}"
+                result_columns.append(
+                    {
+                        "assignment_id": instrument["assignment_id"],
+                        "parameter": parameter,
+                        "label": f'{instrument["name"]} — CH{channel}',
+                        "decimals": 2,
+                        "axis": configuration.get("chart_axis", "primary"),
+                    },
+                )
         else:
             result_columns.append(
                 {
                     "assignment_id": instrument["assignment_id"],
                     "parameter": None,
                     "label": instrument["name"],
-                    "decimals": instrument["voltage_decimals"],
+                    "decimals": instrument["display_decimals"],
                     "axis": configuration.get("chart_axis", "primary"),
                 },
             )
@@ -141,11 +255,7 @@ def _serialize_task(task, *, include_samples=False, samples_queryset=None):
             "seconds": int(task.interval_seconds % 60),
             "hundredths": int(round(task.interval_seconds * 100)) % 100,
         },
-        "sample_count": getattr(
-            task,
-            "sample_count",
-            task.samples.exclude(status=TaskSample.Status.ACQUIRING).count(),
-        ),
+        "sample_count": task.sample_count,
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "finished_at": (
             task.finished_at.isoformat() if task.finished_at else None
@@ -209,6 +319,16 @@ def _serialize_task(task, *, include_samples=False, samples_queryset=None):
                     serialized_reading["value"] = format(
                         reading.value,
                         ".2f",
+                    )
+                if (
+                    reading.parameter == "Temperature"
+                    and reading.task_instrument.instrument.driver
+                    == Instrument.Driver.BTDL_NTC
+                ):
+                    serialized_reading["decimals"] = 1
+                    serialized_reading["value"] = format(
+                        reading.value,
+                        ".1f",
                     )
                 readings.append(serialized_reading)
             if not task_instruments:
@@ -281,12 +401,6 @@ def task_list(request):
             "voltage_meter",
             "temperature_meter",
         )
-        .annotate(
-            sample_count=Count(
-                "samples",
-                filter=~Q(samples__status=TaskSample.Status.ACQUIRING),
-            ),
-        )
         .order_by("-created_at", "-pk")
     )
     available_instruments = []
@@ -298,6 +412,11 @@ def task_list(request):
                 "driver": instrument.driver,
                 "driver_label": instrument.get_driver_display(),
                 "is_power_supply": instrument.is_power_supply,
+                "sensor_inventory_url": (
+                    reverse("bmx280_sensor_inventory", args=(instrument.pk,))
+                    if instrument.driver == Instrument.Driver.BTDL_BMX280
+                    else None
+                ),
                 "voltage_limits": (
                     {
                         name: str(value)
@@ -325,6 +444,28 @@ def task_list(request):
             "available_instruments": available_instruments,
         },
     )
+
+
+@login_required
+@require_GET
+def bmx280_sensor_inventory(request, pk):
+    """Read the sensor types currently attached to one BTDL-BMx280."""
+    try:
+        instrument = Instrument.objects.get(
+            pk=pk,
+            driver=Instrument.Driver.BTDL_BMX280,
+        )
+    except Instrument.DoesNotExist:
+        return JsonResponse({"error": "BTDL-BMx280 was not found."}, status=404)
+    try:
+        with ConnectionManager.session(instrument) as driver:
+            sensors = driver.sensor_inventory()
+    except Exception as exc:
+        return JsonResponse(
+            {"error": str(exc) or "Could not read the BMx280 sensors."},
+            status=503,
+        )
+    return JsonResponse({"sensors": list(sensors)})
 
 
 @login_required
@@ -484,6 +625,51 @@ def task_create(request):
                     )
                 config["source"] = source
                 if (
+                    instrument.driver == Instrument.Driver.BTDL_BMX280
+                    and function == "environment"
+                ):
+                    measurements = config.get("measurements")
+                    if not isinstance(measurements, list) or not measurements:
+                        raise ValueError(
+                            "Select at least one BTDL-BMx280 value to log.",
+                        )
+                    invalid = set(measurements) - set(BMX280_MEASUREMENTS)
+                    if invalid:
+                        raise ValueError("Select valid BTDL-BMx280 values.")
+                    config["measurements"] = list(dict.fromkeys(measurements))
+                    sensor_types = config.get("sensor_types", {})
+                    if isinstance(sensor_types, str):
+                        sensor_types = json.loads(sensor_types)
+                    if not isinstance(sensor_types, dict) or any(
+                        str(channel) not in BTDL_BMX280_ADDRESSES
+                        or sensor_type not in {"BMP280", "BME280"}
+                        for channel, sensor_type in sensor_types.items()
+                    ):
+                        raise ValueError("Invalid BTDL-BMx280 sensor inventory.")
+                    config["sensor_types"] = {
+                        str(channel): sensor_type
+                        for channel, sensor_type in sensor_types.items()
+                    }
+                    measurement_axes = config.get("measurement_axes", {})
+                    if not isinstance(measurement_axes, dict):
+                        raise ValueError("Select valid chart Y-axes.")
+                    if any(
+                        axis not in CHART_AXES
+                        for axis in measurement_axes.values()
+                    ):
+                        raise ValueError("Select valid chart Y-axes.")
+                    config["measurement_axes"] = {
+                        measurement: measurement_axes.get(
+                            measurement,
+                            "primary",
+                        )
+                        for measurement in config["measurements"]
+                    }
+                else:
+                    config.pop("measurements", None)
+                    config.pop("sensor_types", None)
+                    config.pop("measurement_axes", None)
+                if (
                     instrument.driver == Instrument.Driver.MOCK
                     and function == "dc_voltage"
                 ):
@@ -497,8 +683,39 @@ def task_create(request):
                     config["count_mode"] = count_mode
                 else:
                     config.pop("count_mode", None)
+                if (
+                    instrument.driver == Instrument.Driver.BTDL_DS18B20
+                    and function in {"temperature_ds18b20", "temperatures"}
+                ):
+                    bits = int(config.get("ds18b20_resolution_bits", 12))
+                    if bits not in (9, 10, 11, 12):
+                        raise ValueError(
+                            "DS18B20 resolution must be 9, 10, 11, or 12 bits.",
+                        )
+                    config["ds18b20_resolution_bits"] = bits
+                else:
+                    config.pop("ds18b20_resolution_bits", None)
+                if (
+                    instrument.driver in {
+                        Instrument.Driver.AGILENT_34401A,
+                        Instrument.Driver.KEYSIGHT_34461A,
+                    }
+                    and function in {"dc_voltage", "resistance"}
+                ):
+                    resolution = str(
+                        config.get(
+                            "measurement_resolution",
+                            config.get("resolution", "5.5"),
+                        )
+                    )
+                    if resolution not in {"4.5", "5.5", "6.5"}:
+                        resolution = "5.5"
+                    config["resolution"] = resolution
+                    config.pop("measurement_resolution", None)
+                elif function != "temperature":
+                    config.pop("resolution", None)
                 chart_axis = config.get("chart_axis", "primary")
-                if chart_axis not in ("primary", "secondary"):
+                if chart_axis not in CHART_AXES:
                     raise ValueError("Select a valid chart Y-axis.")
                 config["chart_axis"] = chart_axis
                 display_off = config.get("display_off", False)
@@ -717,6 +934,65 @@ def task_stop(request, pk):
 
 @login_required
 @require_POST
+def task_restart(request, pk):
+    """Resume one owned failed task after its last stored sample."""
+    try:
+        task = AutomationTask.objects.get(pk=pk, user=request.user)
+    except AutomationTask.DoesNotExist:
+        return JsonResponse({"error": "Task was not found."}, status=404)
+    if task.status != AutomationTask.Status.FAILED:
+        return JsonResponse(
+            {"error": "Only a failed task can be restarted."},
+            status=409,
+        )
+    instrument_ids = set(
+        task.task_instruments.values_list("instrument_id", flat=True),
+    )
+    instrument_ids.update(
+        instrument_id
+        for instrument_id in (
+            task.power_supply_id,
+            task.voltage_meter_id,
+            task.temperature_meter_id,
+        )
+        if instrument_id is not None
+    )
+    conflicting_task = AutomationTask.objects.filter(
+        status__in=(
+            AutomationTask.Status.PENDING,
+            AutomationTask.Status.RUNNING,
+        ),
+    ).filter(
+        Q(power_supply_id__in=instrument_ids)
+        | Q(voltage_meter_id__in=instrument_ids)
+        | Q(temperature_meter_id__in=instrument_ids)
+        | Q(task_instruments__instrument_id__in=instrument_ids)
+    ).distinct().exists()
+    if conflicting_task:
+        return JsonResponse(
+            {"error": "A task instrument is already in use."},
+            status=409,
+        )
+    task.status = AutomationTask.Status.PENDING
+    task.error = ""
+    task.finished_at = None
+    task.stop_requested = False
+    task.save(
+        update_fields=("status", "error", "finished_at", "stop_requested"),
+    )
+    try:
+        TaskRunner.start(task.pk, resume=True)
+    except ValueError as exc:
+        task.status = AutomationTask.Status.FAILED
+        task.error = str(exc)
+        task.finished_at = timezone.now()
+        task.save(update_fields=("status", "error", "finished_at"))
+        return JsonResponse({"error": str(exc)}, status=409)
+    return JsonResponse(_serialize_task(task, include_samples=True))
+
+
+@login_required
+@require_POST
 def task_complete(request, pk):
     """Mark one owned stopped task as completed."""
     try:
@@ -761,7 +1037,6 @@ def task_export_csv(request, pk):
         task = (
             AutomationTask.objects.prefetch_related(
                 "task_instruments__instrument",
-                "samples__readings__task_instrument__instrument",
             )
             .get(pk=pk, user=request.user)
         )
@@ -796,6 +1071,74 @@ def task_export_csv(request, pk):
                     },
                 ),
             )
+        elif (
+            assignment.configuration.get("function") == "temperatures"
+            and assignment.instrument.driver
+            in {
+                Instrument.Driver.BTDL_DS18B20,
+                Instrument.Driver.BTDL_BMX280,
+            }
+        ):
+            parameters = (
+                (
+                    "Temperature DS1820/DS18S20",
+                    "Temperature DS18B20",
+                )
+                if assignment.instrument.driver
+                == Instrument.Driver.BTDL_DS18B20
+                else ("Temperature channel 1", "Temperature channel 2")
+            )
+            decimals = (
+                1
+                if assignment.instrument.driver
+                == Instrument.Driver.BTDL_DS18B20
+                else 2
+            )
+            for index, parameter in enumerate(parameters, start=1):
+                short_label = (
+                    ("DS1820", "DS18B20")[index - 1]
+                    if assignment.instrument.driver
+                    == Instrument.Driver.BTDL_DS18B20
+                    else f"CH{index}"
+                )
+                columns.append(
+                    {
+                        "key": assignment.pk,
+                        "parameter": parameter,
+                        "label": (
+                            f"{assignment.instrument.name} — {short_label}"
+                        ),
+                        "unit": "°C",
+                        "decimals": decimals,
+                        "assignment": assignment,
+                    },
+                )
+        elif (
+            assignment.configuration.get("function") == "environment"
+            and assignment.instrument.driver == Instrument.Driver.BTDL_BMX280
+        ):
+            for measurement in assignment.configuration.get(
+                "measurements",
+                (),
+            ):
+                metadata = BMX280_MEASUREMENTS.get(measurement)
+                if metadata is None:
+                    continue
+                parameter, _short_label, unit, decimals = metadata
+                columns.append(
+                    {
+                        "key": assignment.pk,
+                        "parameter": parameter,
+                        "label": _bmx280_column_label(
+                            measurement,
+                            assignment.configuration,
+                            assignment.instrument.name,
+                        ),
+                        "unit": unit,
+                        "decimals": decimals,
+                        "assignment": assignment,
+                    },
+                )
         else:
             function = assignment.configuration.get("function")
             capability = assignment.instrument.capabilities.get(function)
@@ -805,11 +1148,9 @@ def task_export_csv(request, pk):
                     "parameter": None,
                     "label": assignment.instrument.name,
                     "unit": capability.unit if capability else "",
-                    "decimals": (
-                        2
-                        if assignment.instrument.driver
-                        == Instrument.Driver.RPI_CPU_TEMPERATURE
-                        else _voltage_decimal_places(assignment.instrument)
+                    "decimals": _measurement_decimal_places(
+                        assignment.instrument,
+                        assignment.configuration,
                     ),
                     "assignment": assignment,
                 },
@@ -862,9 +1203,12 @@ def task_export_csv(request, pk):
                 ),
             ),
         )
-        for sample in task.samples.exclude(
-            status=TaskSample.Status.ACQUIRING,
-        ):
+        samples = (
+            task.samples.exclude(status=TaskSample.Status.ACQUIRING)
+            .prefetch_related("readings")
+            .iterator(chunk_size=2000)
+        )
+        for sample in samples:
             sample_readings = list(sample.readings.all())
             if not assignments:
                 legacy_values = {

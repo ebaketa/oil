@@ -1,6 +1,11 @@
 # OIL Development Handoff
 
-Last updated: 2026-07-31
+For the consolidated context from all local project conversations, see
+[OIL razvoj](OIL_RAZVOJ.md), updated on 2026-09-18. This file now includes the
+environmental-driver and multi-axis work completed after the historical
+snapshot below.
+
+Last updated: 2026-09-18
 
 ## Current baseline
 
@@ -39,6 +44,12 @@ Last updated: 2026-07-31
 - Added an owner-only Mark as completed action for stopped tasks.
 - Standardized the completed Task list label as Completed.
 - Added cache-busting versions to the Tasks JavaScript asset.
+- Added BTDL-NTC, BTDL-DS18B20, and BTDL-BMx280 task-capability integration.
+- Added BMP280/BME280 inventory discovery and per-sensor selection of
+  temperature, humidity, and pressure values.
+- Added one-trigger BMx280 acquisition using the firmware `READ?` response.
+- Added five independent task chart Y-axes and per-measurement axis selection.
+- Reduced serial response polling from 100 ms to 5 ms for fast controllers.
 
 ## Database changes after 0.0.8
 
@@ -73,7 +84,8 @@ after pulling these changes.
   .venv/bin/python manage.py test
   ```
 
-- The latest complete run passed 205 tests.
+- The latest targeted environmental/task run passed 21 tests. Run the complete
+  suite before release; the working tree still contains uncommitted changes.
 
 ## Data synchronization context
 
@@ -99,6 +111,6 @@ Safe merge rules:
 
 ## Next development step
 
-Complete the controlled laptop-to-server data merge, verify the imported task
-history in the UI, and then continue refining task and instrument
-configuration.
+Verify the BMx280 firmware and physical task timing on the server, run the
+complete test suite, review all pending migrations and uncommitted changes,
+then prepare the controlled laptop-to-server data merge and the next release.

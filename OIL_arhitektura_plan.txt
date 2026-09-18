@@ -1,0 +1,299 @@
+OIL - PLAN UNAPREĐENJA ARHITEKTURE
+=================================
+
+Trenutna verzija: 0.0.4
+
+OIL ne treba prepisivati iz početka. Trenutna arhitektura radi, pokrivena je
+testovima i potvrđena je na stvarnim instrumentima. Arhitekturu treba
+unapređivati postupno, uz očuvanje postojećeg ponašanja.
+
+
+1. PODJELA MAIN APLIKACIJE
+-------------------------
+
+Aplikacija main trenutačno je odgovorna za korisnike, instrumente, mjerenja i
+Dashboard. S vremenom bi je trebalo podijeliti na:
+
+    accounts/
+    instruments/
+    measurements/
+    dashboard/
+    services/
+    drivers/
+
+Time bi modeli, forme, viewovi i testovi svakog područja bili jasnije odvojeni.
+
+
+2. DRIVER REGISTRY
+------------------
+
+Trenutačni factory ručno provjerava naziv drivera. Umjesto toga drivere treba
+registrirati:
+
+    DriverRegistry.register(
+        "agilent_34401a",
+        Agilent34401ADriver,
+    )
+
+    DriverRegistry.register(
+        "keysight_34461a",
+        Keysight34461ADriver,
+    )
+
+Dodavanje novog drivera tada ne bi zahtijevalo mijenjanje factory funkcije.
+
+
+3. ODVAJANJE TRANSPORTA OD DRIVERA
+---------------------------------
+
+Predložena struktura:
+
+    Driver
+      |
+      +-- SCPI funkcije
+      |
+      +-- Transport
+            |
+            +-- Serial / FTDI
+            +-- USBTMC
+            +-- VISA
+            +-- Mock
+
+Driver treba znati što poslati instrumentu, a transport kako poslati naredbu.
+Tako se komunikacijski kod može ponovno koristiti i jednostavnije testirati.
+
+
+4. GENERIČKE MJERNE FUNKCIJE
+----------------------------
+
+Trenutačno imamo posebnu funkciju za DC napon:
+
+    driver.measure_dc_voltage()
+
+Dugoročno bi bilo bolje imati:
+
+    driver.configure(function, **settings)
+    driver.measure()
+
+Primjer:
+
+    driver.configure(
+        function="dc_voltage",
+        autorange=True,
+        nplc=10,
+    )
+
+To bi omogućilo postupno dodavanje:
+
+    - AC napona
+    - DC i AC struje
+    - otpora
+    - frekvencije
+    - temperature
+    - diode testa
+    - continuity testa
+
+Svaki model instrumenta i dalje treba imati vlastitu validaciju podržanih
+funkcija i raspona.
+
+
+5. MODEL MEASUREMENT RUN
+------------------------
+
+OIL trenutačno sprema pojedinačna mjerenja, ali nema trajni zapis cijele serije.
+
+Treba dodati model MeasurementRun:
+
+    MeasurementRun
+    --------------
+    user
+    instrument
+    function
+    mode: single / continuous / loop
+    interval
+    requested_count
+    status
+    started_at
+    stopped_at
+    notes
+    error
+
+Svako pojedinačno Measurement mjerenje pripadalo bi jednom MeasurementRun
+zapisu.
+
+Prednosti:
+
+    - pregled prethodnih serija
+    - ponovno pokretanje istih postavki
+    - izvoz cijele serije
+    - prikaz napretka
+    - bilježenje razloga prekida
+    - jasna veza između Single, Continuous i Loop mjerenja
+
+
+6. ZASEBAN INSTRUMENT WORKER
+----------------------------
+
+Najvažnije buduće poboljšanje je izdvajanje rada s instrumentima iz Django HTTP
+zahtjeva.
+
+Predloženi tok:
+
+    Browser
+       |
+       v
+    Django
+       |
+       v
+    Measurement queue
+       |
+       v
+    Instrument worker
+       |
+       v
+    Instrument
+
+Worker bi bio jedini vlasnik fizičkih veza.
+
+Prednosti:
+
+    - mjerenje se nastavlja ako korisnik zatvori browser
+    - nema dugih Django HTTP zahtjeva
+    - sigurniji Stop
+    - nema sukoba između više web procesa
+    - bolja kontrola timeouta
+    - mogućnost kontroliranog retryja
+    - osnova za zakazana mjerenja
+
+Za početak nije nužno uvoditi Celery. Dovoljan može biti vlastiti Python worker
+koji koristi bazu podataka ili Redis.
+
+
+7. UKLANJANJE PROCESNO-LOKALNOG STANJA
+--------------------------------------
+
+Trenutačni Connection Manager i Continuous Stop signali postoje samo unutar
+jednog Django procesa.
+
+Za produkciju bi stanje trebalo premjestiti u:
+
+    - bazu podataka za MeasurementRun
+    - Redis ili drugi queue za Start i Stop naredbe
+    - instrument worker za aktivne fizičke veze
+
+Tada OIL može koristiti više Django procesa bez gubitka kontrole nad
+instrumentima.
+
+
+8. CAPABILITY SUSTAV
+--------------------
+
+Ne podržava svaki instrument iste funkcije i postavke. Svaki driver trebao bi
+objaviti svoje mogućnosti:
+
+    driver.capabilities()
+
+Primjer:
+
+    {
+        "dc_voltage": {
+            "autorange": True,
+            "ranges": [0.1, 1, 10, 100, 1000],
+            "nplc": [0.02, 0.2, 1, 10, 100],
+        },
+        "resistance": {
+            ...
+        },
+    }
+
+Korisničko sučelje bi tada prikazivalo samo funkcije i postavke koje odabrani
+instrument stvarno podržava.
+
+
+9. MOCK DRIVER
+--------------
+
+Mock instrument omogućio bi:
+
+    - razvoj bez priključenog hardvera
+    - testiranje dugih Loop serija
+    - testiranje Continuous mjerenja
+    - simuliranje timeouta
+    - simuliranje SCPI grešaka
+    - testiranje Start i Stop ponašanja
+    - demonstracijsku instalaciju OIL-a
+
+Ovo je jedna od najboljih ideja koje možemo preuzeti iz ELMS-a.
+
+
+10. SERVISNI I API SLOJ
+-----------------------
+
+HTML viewovi ne bi trebali poznavati detalje rada s instrumentom.
+
+Predloženi tok:
+
+    View ili API
+         |
+         v
+    MeasurementService
+         |
+         v
+    MeasurementRun
+         |
+         v
+    Worker ili ConnectionManager
+         |
+         v
+    Driver
+
+Isti servis tada mogu koristiti:
+
+    - web stranice
+    - JSON API
+    - buduća mobilna aplikacija
+    - komandna linija
+    - automatizirani rasporedi
+
+
+PREPORUČENI REDOSLIJED RAZVOJA
+==============================
+
+VERZIJA 0.0.5
+-------------
+
+    1. MeasurementRun model
+    2. Driver Registry
+    3. Mock driver
+    4. capability sustav
+    5. AC napon i otpor
+
+
+VERZIJA 0.0.6
+-------------
+
+    1. Izdvajanje Django aplikacija
+    2. Zajednički transportni sloj
+    3. REST / JSON API
+    4. Izvoz mjerenja u CSV
+
+
+VERZIJA 0.1.0
+-------------
+
+    1. Zaseban instrument worker
+    2. Trajni Start i Stop poslovi
+    3. Podrška za više Django procesa
+    4. Rasporedi i automatizirani testovi
+
+
+ZAKLJUČAK
+=========
+
+Najvažniji sljedeći korak je MeasurementRun model. On bi dao čvrstu domensku
+osnovu za Single, Continuous i Loop mjerenja, bez potrebe da odmah mijenjamo
+postojeće drivere ili korisničko sučelje.
+
+OIL trenutačno ima bolji operativni workflow od ELMS-a, dok ELMS ima modularniju
+osnovu. Najbolji smjer je zadržati OIL-ov postojeći rad s instrumentima i
+postupno preuzeti dobre arhitekturne ideje iz ELMS-a.

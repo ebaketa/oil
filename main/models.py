@@ -50,6 +50,9 @@ class Instrument(models.Model):
         """Instrument drivers currently supplied with OIL."""
 
         AGILENT_34401A = "agilent_34401a", "Agilent 34401A"
+        BTDL_NTC = "btdl_ntc", "Baketa BTDL-NTC"
+        BTDL_DS18B20 = "btdl_ds18b20", "Baketa BTDL-DS18B20"
+        BTDL_BMX280 = "btdl_bmx280", "Baketa BTDL-BMx280"
         KEYSIGHT_34461A = "keysight_34461a", "Keysight 34461A"
         MOCK = "mock-dmm", "Mock DMM"
         MOCK_DC_POWER_SUPPLY = (

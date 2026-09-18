@@ -1,9 +1,14 @@
+from unittest.mock import MagicMock, patch
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from main.models import Instrument
 from tasks.models import AutomationTask, TaskInstrument, TaskReading, TaskSample
+
+from .models import PanelLease
 
 
 class DmmPanelTests(TestCase):
@@ -44,6 +49,272 @@ class DmmPanelTests(TestCase):
         self.assertContains(response, ">Range +</button>", html=False)
         self.assertContains(response, ">Range −</button>", html=False)
         self.assertContains(response, ">Resolution 4¾ · 50k</button>", html=False)
+
+    def test_agilent_panel_reads_current_instrument_status(self):
+        instrument = Instrument.objects.create(
+            name="Bench Agilent",
+            manufacturer="Agilent",
+            model_name="34401A",
+            driver=Instrument.Driver.AGILENT_34401A,
+            address="/dev/ttyUSB0",
+        )
+        driver = MagicMock()
+        driver.read_panel_status.return_value = {
+            "function": "ac_voltage",
+            "parameter": "Voltage AC",
+            "unit": "V",
+            "autorange": True,
+            "range_value": 10.0,
+            "value": 1.25,
+        }
+
+        with patch(
+            "dmm_panel.views.ConnectionManager.persistent_session",
+        ) as session:
+            session.return_value.__enter__.return_value = driver
+            response = self.client.get(
+                reverse("dmm_panel_status", args=[instrument.pk]),
+                {"panel_token": "primary-panel-token"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["function"], "ac_voltage")
+        self.assertEqual(response.json()["value"], 1.25)
+        driver.read_panel_status.assert_called_once_with()
+
+    def test_agilent_panel_exposes_actual_front_panel_functions(self):
+        instrument = Instrument.objects.create(
+            name="Bench Agilent functions",
+            manufacturer="Agilent",
+            model_name="34401A",
+            driver=Instrument.Driver.AGILENT_34401A,
+            address="/dev/ttyUSB0",
+        )
+
+        response = self.client.get(
+            reverse("dmm_panel", args=[instrument.pk]),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        for label in (
+            "DCV", "DCI", "ACV", "ACI", "Ω 2W", "Ω 4W",
+            "Freq", "Period", "Cont )))", "Diode",
+        ):
+            self.assertContains(response, f">{label}</button>", html=False)
+        self.assertNotContains(response, ">Cap</button>", html=False)
+        self.assertNotContains(response, ">Temp</button>", html=False)
+
+    def test_second_agilent_panel_receives_cached_read_only_status(self):
+        instrument = Instrument.objects.create(
+            name="Shared Agilent",
+            manufacturer="Agilent",
+            model_name="34401A",
+            driver=Instrument.Driver.AGILENT_34401A,
+            address="/dev/ttyUSB0",
+        )
+        driver = MagicMock()
+        driver.read_panel_status.return_value = {
+            "function": "dc_voltage",
+            "parameter": "Voltage DC",
+            "unit": "V",
+            "autorange": True,
+            "range_value": 10.0,
+            "value": 1.25,
+            "resolution": "6.5",
+            "decimals": 5,
+        }
+        url = reverse("dmm_panel_status", args=[instrument.pk])
+
+        with patch(
+            "dmm_panel.views.ConnectionManager.persistent_session",
+        ) as session:
+            session.return_value.__enter__.return_value = driver
+            owner_response = self.client.get(
+                url,
+                {"panel_token": "primary-panel-token"},
+            )
+            viewer_response = self.client.get(
+                url,
+                {"panel_token": "second-panel-token"},
+            )
+
+        self.assertIs(owner_response.json()["read_only"], False)
+        self.assertIs(viewer_response.json()["read_only"], True)
+        self.assertEqual(viewer_response.json()["value"], 1.25)
+        driver.read_panel_status.assert_called_once_with()
+
+    def test_agilent_panel_sets_measurement_resolution(self):
+        instrument = Instrument.objects.create(
+            name="Bench Agilent",
+            manufacturer="Agilent",
+            model_name="34401A",
+            driver=Instrument.Driver.AGILENT_34401A,
+            address="/dev/ttyUSB0",
+        )
+        driver = MagicMock()
+        driver.set_resolution.return_value = 10.0
+        PanelLease.objects.create(
+            instrument=instrument,
+            user=self.user,
+            owner_token="primary-panel-token",
+            last_seen=timezone.now(),
+        )
+
+        with patch("dmm_panel.views.ConnectionManager.session") as session:
+            session.return_value.__enter__.return_value = driver
+            response = self.client.post(
+                reverse("dmm_panel_resolution", args=[instrument.pk]),
+                {
+                    "function": "dc_voltage",
+                    "resolution": "6.5",
+                    "panel_token": "primary-panel-token",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {"resolution": "6.5", "nplc": 10.0, "commands": []},
+        )
+        driver.set_resolution.assert_called_once_with("dc_voltage", "6.5")
+
+    def test_agilent_panel_sets_exact_nplc(self):
+        instrument = Instrument.objects.create(
+            name="Bench Agilent NPLC",
+            manufacturer="Agilent",
+            model_name="34401A",
+            driver=Instrument.Driver.AGILENT_34401A,
+            address="/dev/ttyUSB0",
+        )
+        driver = MagicMock()
+        driver.set_nplc.return_value = 20.0
+        driver.drain_command_log.return_value = [
+            "VOLT:DC:NPLC 20",
+            "VOLT:DC:NPLC?",
+        ]
+        PanelLease.objects.create(
+            instrument=instrument,
+            user=self.user,
+            owner_token="primary-panel-token",
+            last_seen=timezone.now(),
+        )
+
+        with patch("dmm_panel.views.ConnectionManager.session") as session:
+            session.return_value.__enter__.return_value = driver
+            response = self.client.post(
+                reverse("dmm_panel_nplc", args=[instrument.pk]),
+                {
+                    "function": "dc_voltage",
+                    "nplc": "20",
+                    "panel_token": "primary-panel-token",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "nplc": 20.0,
+                "commands": ["VOLT:DC:NPLC 20", "VOLT:DC:NPLC?"],
+            },
+        )
+        driver.set_nplc.assert_called_once_with("dc_voltage", 20.0)
+
+    def test_panel_measurement_error_does_not_escape_active_session(self):
+        instrument = Instrument.objects.create(
+            name="Remote Agilent",
+            manufacturer="Agilent",
+            model_name="34401A",
+            driver=Instrument.Driver.AGILENT_34401A,
+            address="/dev/ttyUSB0",
+        )
+        PanelLease.objects.create(
+            instrument=instrument,
+            user=self.user,
+            owner_token="primary-panel-token",
+            last_seen=timezone.now(),
+        )
+        driver = MagicMock()
+        driver.measure_ac_voltage.side_effect = RuntimeError("ACV failed")
+
+        with patch("dmm_panel.views.ConnectionManager.session") as session:
+            session.return_value.__enter__.return_value = driver
+            response = self.client.post(
+                reverse("dmm_panel_measure", args=[instrument.pk]),
+                {
+                    "function": "ac_voltage",
+                    "range": "auto",
+                    "panel_token": "primary-panel-token",
+                },
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["error"], "ACV failed")
+        session.return_value.__exit__.assert_called_once_with(None, None, None)
+
+    def test_agilent_panel_clears_errors_when_owner_leaves(self):
+        instrument = Instrument.objects.create(
+            name="Leaving Agilent",
+            manufacturer="Agilent",
+            model_name="34401A",
+            driver=Instrument.Driver.AGILENT_34401A,
+            address="/dev/ttyUSB0",
+        )
+        PanelLease.objects.create(
+            instrument=instrument,
+            user=self.user,
+            owner_token="primary-panel-token",
+            last_seen=timezone.now(),
+        )
+        driver = MagicMock()
+        driver.clear_error_queue.return_value = ('-113,"Undefined header"',)
+
+        with patch(
+            "dmm_panel.views.ConnectionManager.persistent_session",
+        ) as session:
+            session.return_value.__enter__.return_value = driver
+            response = self.client.post(
+                reverse("dmm_panel_release", args=[instrument.pk]),
+                {"panel_token": "primary-panel-token"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["cleared_errors"],
+            ['-113,"Undefined header"'],
+        )
+        driver.clear_error_queue.assert_called_once_with()
+        self.assertFalse(PanelLease.objects.filter(instrument=instrument).exists())
+
+    def test_panel_cls_sends_clear_status_command(self):
+        instrument = Instrument.objects.create(
+            name="Clear Agilent",
+            manufacturer="Agilent",
+            model_name="34401A",
+            driver=Instrument.Driver.AGILENT_34401A,
+            address="/dev/ttyUSB0",
+        )
+        PanelLease.objects.create(
+            instrument=instrument,
+            user=self.user,
+            owner_token="primary-panel-token",
+            last_seen=timezone.now(),
+        )
+        driver = MagicMock()
+        driver.drain_command_log.return_value = ["*CLS"]
+
+        with patch(
+            "dmm_panel.views.ConnectionManager.persistent_session",
+        ) as session:
+            session.return_value.__enter__.return_value = driver
+            response = self.client.post(
+                reverse("dmm_panel_clear", args=[instrument.pk]),
+                {"panel_token": "primary-panel-token"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"cleared": True, "commands": ["*CLS"]})
+        driver.write.assert_called_once_with("*CLS")
 
     def test_fixed_range_is_validated_against_driver_capabilities(self):
         response = self.client.post(
@@ -214,6 +485,49 @@ class DmmPanelTests(TestCase):
         self.assertEqual(live_response.json()["maximum"], 4.9999)
         self.assertEqual(live_response.json()["average"], 4.9999)
         self.assertEqual(live_response.json()["recent_values"], [4.9999])
+
+    def test_busy_agilent_panel_uses_task_measurement_resolution(self):
+        instrument = Instrument.objects.create(
+            name="Task Agilent",
+            manufacturer="Agilent",
+            model_name="34401A",
+            driver=Instrument.Driver.AGILENT_34401A,
+            address="/dev/ttyUSB0",
+        )
+        task = AutomationTask.objects.create(
+            user=self.user,
+            name="Precision task",
+            status=AutomationTask.Status.RUNNING,
+        )
+        assignment = TaskInstrument.objects.create(
+            task=task,
+            instrument=instrument,
+            configuration={
+                "function": "dc_voltage",
+                "source": "external",
+                "resolution": "6.5",
+            },
+        )
+        sample = TaskSample.objects.create(
+            task=task,
+            index=1,
+            voltage_setpoint=0,
+            acquisition_time_seconds="0.100",
+        )
+        TaskReading.objects.create(
+            sample=sample,
+            task_instrument=assignment,
+            parameter="Voltage DC",
+            value="1.234567",
+            unit="V",
+        )
+
+        response = self.client.get(
+            reverse("dmm_panel_live", args=[instrument.pk]),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["decimals"], 5)
 
     def test_non_measurement_instrument_has_no_panel(self):
         supply = Instrument.objects.create(

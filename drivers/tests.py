@@ -31,13 +31,13 @@ class Agilent34401ADriverTests(SimpleTestCase):
     @patch("drivers.agilent_34401a.time.sleep")
     @patch("serial.tools.list_ports.comports")
     @patch("drivers.transports.serial.serial.Serial")
-    def test_connect_prepares_dc_voltage_measurement(
+    def test_connect_preserves_active_measurement_function(
         self,
         serial_factory,
         comports,
         _sleep,
     ):
-        """Connecting follows the original reader's initialization lifecycle."""
+        """Opening the port does not overwrite the instrument front panel."""
         connection = MagicMock(is_open=True, in_waiting=0)
         serial_factory.return_value = connection
         comports.return_value = [
@@ -56,7 +56,216 @@ class Agilent34401ADriverTests(SimpleTestCase):
             serial_factory.call_args.kwargs["stopbits"],
             2,
         )
-        self.assertTrue(driver._dc_voltage_prepared)
+        self.assertFalse(driver._dc_voltage_prepared)
+        self.assertIsNone(driver._prepared_function)
+        self.assertEqual(
+            [call.args[0] for call in connection.write.call_args_list],
+            [b"SYSTem:REMote\n"],
+        )
+
+    def test_panel_status_reads_function_range_and_value(self):
+        """Panel status reflects the current instrument configuration."""
+        driver = Agilent34401ADriver(port="/dev/ttyUSB0")
+
+        with patch.object(
+            driver,
+            "query",
+            side_effect=[
+                '"VOLT:DC"',
+                "0",
+                "+1.23450000E+00",
+                "+1.00000000E+01",
+                "+1.00000000E+00",
+                "+1.00000000E-04",
+                "1",
+            ],
+        ) as query:
+            status = driver.read_panel_status()
+
+        self.assertEqual(
+            [call.args[0] for call in query.call_args_list],
+            [
+                "FUNC?",
+                "VOLT:DC:RANG:AUTO?",
+                "READ?",
+                "VOLT:DC:RANG?",
+                "VOLT:DC:NPLC?",
+                "VOLT:DC:RES?",
+                "ZERO:AUTO?",
+            ],
+        )
+        self.assertEqual(status["function"], "dc_voltage")
+        self.assertIs(status["autorange"], False)
+        self.assertEqual(status["range_value"], 10.0)
+        self.assertEqual(status["value"], 1.2345)
+        self.assertEqual(status["resolution"], "5.5")
+        self.assertEqual(status["resolution_mode"], "4.5_slow")
+        self.assertEqual(status["nplc"], 1.0)
+        self.assertEqual(status["decimals"], 4)
+        self.assertEqual(driver._prepared_function, "dc_voltage:10")
+
+    def test_panel_status_supports_fixed_range_diode_mode(self):
+        """Diode status does not send unsupported range queries."""
+        driver = Agilent34401ADriver(port="/dev/ttyUSB0")
+
+        with patch.object(
+            driver,
+            "query",
+            side_effect=['"DIOD"', "+6.50000000E-01"],
+        ) as query:
+            status = driver.read_panel_status()
+
+        self.assertEqual(
+            [call.args[0] for call in query.call_args_list],
+            ["FUNC?", "READ?"],
+        )
+        self.assertEqual(status["function"], "diode")
+        self.assertIs(status["autorange"], False)
+        self.assertIsNone(status["range_value"])
+        self.assertEqual(status["value"], 0.65)
+
+    def test_panel_status_adapts_dc_current_display_precision(self):
+        """DCI status includes its actual range and NPLC-derived precision."""
+        driver = Agilent34401ADriver(port="/dev/ttyUSB0")
+
+        with patch.object(
+            driver,
+            "query",
+            side_effect=[
+                '"CURR:DC"', "1", "0.012345", "0.1", "1", "1e-6", "1",
+            ],
+        ) as query:
+            status = driver.read_panel_status()
+
+        self.assertEqual(
+            [call.args[0] for call in query.call_args_list],
+            [
+                "FUNC?",
+                "CURR:DC:RANG:AUTO?",
+                "READ?",
+                "CURR:DC:RANG?",
+                "CURR:DC:NPLC?",
+                "CURR:DC:RES?",
+                "ZERO:AUTO?",
+            ],
+        )
+        self.assertIs(status["autorange"], True)
+        self.assertEqual(status["range_value"], 0.1)
+        self.assertEqual(status["resolution"], "5.5")
+        self.assertEqual(status["resolution_mode"], "4.5_slow")
+        self.assertEqual(status["decimals"], 6)
+
+    def test_nplc_ten_reports_ambiguous_front_panel_mode(self):
+        driver = Agilent34401ADriver(port="/dev/ttyUSB0")
+
+        with patch.object(
+            driver,
+            "query",
+            side_effect=[
+                '"VOLT:DC"', "1", "1.2345", "10", "10", "1e-5", "1",
+            ],
+        ):
+            status = driver.read_panel_status()
+
+        self.assertEqual(status["resolution"], "6.5")
+        self.assertEqual(
+            status["resolution_mode"],
+            "5.5_slow_or_6.5_fast",
+        )
+        self.assertEqual(status["decimals"], 5)
+
+    @patch("drivers.agilent_34401a.time.sleep")
+    def test_resolution_is_set_and_verified_through_nplc(self, _sleep):
+        driver = Agilent34401ADriver(port="/dev/ttyUSB0")
+
+        with (
+            patch.object(driver, "execute") as execute,
+            patch.object(driver, "query", return_value="10") as query,
+        ):
+            nplc = driver.set_resolution("dc_voltage", "6.5")
+
+        execute.assert_called_once_with("VOLT:DC:NPLC 10")
+        query.assert_called_once_with("VOLT:DC:NPLC?")
+        self.assertEqual(nplc, 10.0)
+
+    @patch("drivers.agilent_34401a.time.sleep")
+    def test_exact_nplc_is_set_and_verified(self, _sleep):
+        driver = Agilent34401ADriver(port="/dev/ttyUSB0")
+
+        with (
+            patch.object(driver, "execute") as execute,
+            patch.object(driver, "query", return_value="20") as query,
+        ):
+            nplc = driver.set_nplc("dc_voltage", 20.0)
+
+        execute.assert_called_once_with("VOLT:DC:NPLC 20")
+        query.assert_called_once_with("VOLT:DC:NPLC?")
+        self.assertEqual(nplc, 20.0)
+
+    def test_read_query_allows_slow_measurement_to_finish(self):
+        driver = Agilent34401ADriver(port="/dev/ttyUSB0")
+        driver.transport = MagicMock(spec=InstrumentTransport)
+        driver.transport.query.return_value = "1.234567"
+
+        result = driver.query("READ?")
+
+        self.assertEqual(result, "1.234567")
+        driver.transport.query.assert_called_once_with("READ?", timeout=10)
+
+    @patch("drivers.agilent_34401a.time.sleep")
+    def test_front_panel_equivalent_resolution_mode_is_applied(self, _sleep):
+        driver = Agilent34401ADriver(port="/dev/ttyUSB0")
+
+        with (
+            patch.object(
+                driver,
+                "query",
+                side_effect=["10", "1", "10"],
+            ) as query,
+            patch.object(driver, "execute") as execute,
+        ):
+            result = driver.set_resolution_mode("dc_voltage", "6.5_fast")
+
+        self.assertEqual(
+            [call.args[0] for call in execute.call_args_list],
+            [
+                "VOLT:DC:NPLC 10",
+                "ZERO:AUTO ON",
+            ],
+        )
+        self.assertEqual(
+            [call.args[0] for call in query.call_args_list],
+            [
+                "VOLT:DC:NPLC?",
+                "ZERO:AUTO?",
+                "VOLT:DC:RANG?",
+            ],
+        )
+        self.assertEqual(result["resolution_mode"], "6.5_fast")
+        self.assertEqual(result["nplc"], 10.0)
+        self.assertIs(result["autozero"], True)
+        self.assertEqual(result["decimals"], 5)
+
+    @patch("drivers.agilent_34401a.time.sleep")
+    def test_selected_resolution_is_restored_after_function_setup(self, _sleep):
+        driver = Agilent34401ADriver(port="/dev/ttyUSB0")
+        driver.transport = MagicMock(spec=InstrumentTransport)
+        driver.transport.is_open = True
+        driver.transport.read.return_value = "1.234567"
+        driver._selected_resolutions["dc_voltage"] = "6.5"
+
+        driver.measure_dc_voltage()
+
+        self.assertEqual(
+            [call.args[0] for call in driver.transport.write.call_args_list],
+            [
+                "*CLS",
+                "CONF:VOLT:DC",
+                "VOLT:DC:RANG:AUTO ON",
+                "VOLT:DC:NPLC 10",
+                "READ?",
+            ],
+        )
 
     @patch("drivers.agilent_34401a.time.sleep")
     @patch("serial.tools.list_ports.comports")
@@ -87,6 +296,7 @@ class Agilent34401ADriverTests(SimpleTestCase):
         self.assertEqual(
             [call.args[0] for call in connection.write.call_args_list],
             [
+                b"SYSTem:REMote\n",
                 b"*IDN?\n",
                 b"SYSTem:LOCal\n",
             ],
@@ -141,6 +351,8 @@ class Agilent34401ADriverTests(SimpleTestCase):
             result,
             MeasurementResult(parameter="Voltage DC", value=1.2345, unit="V"),
         )
+        self.assertEqual(driver.drain_command_log(), ["READ?"])
+        self.assertEqual(driver.drain_command_log(), [])
 
     @patch("drivers.agilent_34401a.time.sleep")
     def test_ac_voltage_and_resistance_reconfigure_serial_function(self, _sleep):
@@ -159,11 +371,9 @@ class Agilent34401ADriverTests(SimpleTestCase):
             [
                 "*CLS",
                 "CONF:VOLT:AC",
-                "VOLT:AC:RANG:AUTO ON",
                 "READ?",
                 "*CLS",
                 "CONF:RES",
-                "RES:RANG:AUTO ON",
                 "READ?",
             ],
         )
@@ -176,6 +386,78 @@ class Agilent34401ADriverTests(SimpleTestCase):
             MeasurementResult(parameter="Resistance", value=1000.0, unit="Ω"),
         )
 
+    @patch("drivers.agilent_34401a.time.sleep")
+    def test_acv_manual_range_is_configured_without_extra_commands(self, _sleep):
+        driver = Agilent34401ADriver(port="/dev/ttyUSB0")
+        driver.transport = MagicMock(spec=InstrumentTransport)
+        driver.transport.is_open = True
+        driver.transport.read.return_value = "0.012345"
+
+        result = driver.measure_ac_voltage(0.1)
+
+        self.assertEqual(
+            [call.args[0] for call in driver.transport.write.call_args_list],
+            ["*CLS", "CONF:VOLT:AC 0.1", "READ?"],
+        )
+        driver.transport.query.assert_not_called()
+        self.assertEqual(
+            result,
+            MeasurementResult(parameter="Voltage AC", value=0.012345, unit="V"),
+        )
+
+    @patch("drivers.agilent_34401a.time.sleep")
+    def test_all_front_panel_functions_use_documented_setup(self, _sleep):
+        """The added 34401A functions select autorange where supported."""
+        driver = Agilent34401ADriver(port="/dev/ttyUSB0")
+        driver.transport = MagicMock(spec=InstrumentTransport)
+        driver.transport.is_open = True
+        driver.transport.read.side_effect = ["1"] * 8
+
+        driver.measure_dc_current()
+        driver.measure_ac_current()
+        driver.measure_resistance_4w()
+        driver.measure_frequency()
+        driver.measure_period()
+        driver.measure_continuity()
+        driver.measure_diode()
+
+        commands = [
+            call.args[0] for call in driver.transport.write.call_args_list
+        ]
+        self.assertIn("CONF:CURR:DC", commands)
+        self.assertNotIn("CURR:DC:RANG:AUTO ON", commands)
+        driver.transport.query.assert_not_called()
+        self.assertIn("CONF:CURR:AC", commands)
+        self.assertNotIn("CURR:AC:RANG:AUTO ON", commands)
+        self.assertIn("CONF:FRES", commands)
+        self.assertNotIn("FRES:RANG:AUTO ON", commands)
+        self.assertIn("CONF:FREQ", commands)
+        self.assertNotIn("FREQ:VOLT:RANG:AUTO ON", commands)
+        self.assertIn("CONF:PER", commands)
+        self.assertNotIn("PER:VOLT:RANG:AUTO ON", commands)
+        self.assertIn("CONF:CONT", commands)
+        self.assertIn("CONF:DIOD", commands)
+
+    @patch("drivers.agilent_34401a.time.sleep")
+    def test_dci_manual_range_is_configured_without_extra_commands(self, _sleep):
+        driver = Agilent34401ADriver(port="/dev/ttyUSB0")
+        driver.transport = MagicMock(spec=InstrumentTransport)
+        driver.transport.is_open = True
+        driver.transport.read.return_value = "0.012345"
+        driver.transport.query.return_value = "0"
+
+        result = driver.measure_dc_current(0.1)
+
+        self.assertEqual(
+            [call.args[0] for call in driver.transport.write.call_args_list],
+            ["*CLS", "CONF:CURR:DC 0.1", "READ?"],
+        )
+        driver.transport.query.assert_not_called()
+        self.assertEqual(
+            result,
+            MeasurementResult(parameter="Current DC", value=0.012345, unit="A"),
+        )
+
     def test_measurement_rejects_invalid_response(self):
         """A malformed serial response becomes a measurement error."""
         driver = Agilent34401ADriver(port="/dev/ttyUSB0")
@@ -186,6 +468,23 @@ class Agilent34401ADriverTests(SimpleTestCase):
 
         with self.assertRaises(MeasurementError):
             driver.measure_dc_voltage()
+
+    @patch("drivers.agilent_34401a.time.sleep")
+    def test_panel_error_recovery_aborts_without_returning_local(self, _sleep):
+        driver = Agilent34401ADriver(port="/dev/ttyUSB0")
+        driver.transport = MagicMock(spec=InstrumentTransport)
+        driver.transport.is_open = True
+        driver._prepared_function = "ac_voltage"
+
+        driver.recover_panel_error()
+
+        driver.transport.reset_input_buffer.assert_called_once_with()
+        driver.transport.write.assert_called_once_with("ABOR")
+        self.assertIsNone(driver._prepared_function)
+        self.assertNotIn(
+            "SYSTem:LOCal",
+            [call.args[0] for call in driver.transport.write.call_args_list],
+        )
 
     @patch("drivers.agilent_34401a.time.sleep")
     def test_prepare_dcv_uses_proven_serial_sequence(self, sleep):
@@ -301,6 +600,45 @@ class Keysight34461ADriverTests(SimpleTestCase):
             [call.args[0] for call in write.call_args_list],
             ["DISP OFF", "DISP ON"],
         )
+
+    def test_panel_status_reads_resolution_range_and_value(self):
+        driver = Keysight34461ADriver()
+
+        with patch.object(
+            driver,
+            "query",
+            side_effect=['"VOLT:DC"', "1", "1.234567", "10", "10"],
+        ) as query:
+            status = driver.read_panel_status()
+
+        self.assertEqual(
+            [call.args[0] for call in query.call_args_list],
+            [
+                "FUNC?",
+                "VOLT:DC:RANG:AUTO?",
+                "READ?",
+                "VOLT:DC:RANG?",
+                "VOLT:DC:NPLC?",
+            ],
+        )
+        self.assertEqual(status["function"], "dc_voltage")
+        self.assertEqual(status["resolution"], "6.5")
+        self.assertEqual(status["decimals"], 5)
+        self.assertEqual(status["value"], 1.234567)
+
+    def test_resolution_is_set_and_verified_through_nplc(self):
+        driver = Keysight34461ADriver()
+
+        with (
+            patch.object(driver, "execute") as execute,
+            patch.object(driver, "query", return_value="1") as query,
+        ):
+            nplc = driver.set_resolution("dc_voltage", "5.5")
+
+        execute.assert_called_once_with("VOLT:DC:NPLC 1")
+        query.assert_called_once_with("VOLT:DC:NPLC?")
+        self.assertEqual(nplc, 1.0)
+        self.assertEqual(driver._selected_resolutions["dc_voltage"], "5.5")
 
     def test_connect_wraps_device_open_error(self):
         """An inaccessible USBTMC node becomes a connection error."""
@@ -628,6 +966,9 @@ class DriverRegistryTests(SimpleTestCase):
             DriverRegistry.names(),
             (
                 "agilent_34401a",
+                "btdl_bmx280",
+                "btdl_ds18b20",
+                "btdl_ntc",
                 "keysight_34461a",
                 "mock-dmm",
                 "mock_dc_power_supply",

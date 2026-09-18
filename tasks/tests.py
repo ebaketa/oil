@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from main.models import Instrument
 from drivers.base import MeasurementResult
-from drivers.exceptions import MeasurementError
+from drivers.exceptions import CommunicationError, MeasurementError
 
 from .bench import VirtualMockBench
 from .models import (
@@ -167,7 +167,7 @@ class TaskViewTests(TestCase):
         self.assertContains(response, 'id="saved-task-pane-template"')
         self.assertContains(response, 'id="saved-tasks-tab"')
         self.assertContains(response, 'id="task-status-filter"')
-        self.assertContains(response, "tasks/js/task_tabs.js?v=39")
+        self.assertContains(response, "tasks/js/task_tabs.js?v=47")
         self.assertContains(response, "task-stop-button")
         self.assertContains(response, "task-complete-button")
         self.assertContains(response, "saved-task-elapsed")
@@ -619,6 +619,59 @@ class TaskViewTests(TestCase):
         self.assertEqual(task.status, AutomationTask.Status.STOPPED)
         self.assertTrue(task.stop_requested)
         self.assertIsNotNone(task.finished_at)
+
+    @patch("tasks.views.TaskRunner.start")
+    def test_owner_can_restart_failed_task_from_next_sample(self, start):
+        """A failed task is queued for resume without deleting its history."""
+        task = AutomationTask.objects.create(
+            user=self.user,
+            name="Failed sweep",
+            status=AutomationTask.Status.FAILED,
+            error="temporary timeout",
+            stop_requested=True,
+            started_at=timezone.now() - timedelta(minutes=5),
+            finished_at=timezone.now(),
+        )
+        TaskInstrument.objects.create(
+            task=task,
+            instrument=self.instrument,
+            configuration={
+                "function": "dc_voltage",
+                "source": "external",
+            },
+        )
+        sample = TaskSample.objects.create(
+            task=task,
+            index=12,
+            voltage_setpoint=1,
+            status=TaskSample.Status.ACQUIRING,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("task_restart", args=[task.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        task.refresh_from_db()
+        self.assertEqual(task.status, AutomationTask.Status.PENDING)
+        self.assertEqual(task.error, "")
+        self.assertFalse(task.stop_requested)
+        self.assertIsNone(task.finished_at)
+        self.assertTrue(TaskSample.objects.filter(pk=sample.pk).exists())
+        start.assert_called_once_with(task.pk, resume=True)
+
+    @patch("tasks.views.TaskRunner.start")
+    def test_completed_task_cannot_be_restarted(self, start):
+        task = AutomationTask.objects.create(
+            user=self.user,
+            name="Completed task",
+            status=AutomationTask.Status.COMPLETED,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.post(reverse("task_restart", args=[task.pk]))
+
+        self.assertEqual(response.status_code, 409)
+        start.assert_not_called()
 
     def test_owner_can_delete_completed_task(self):
         """Deleting a task also removes its assignments and readings."""
@@ -1341,3 +1394,51 @@ class AutomationRunnerTests(TestCase):
         )
         self.assertIn("temporary timeout", samples[0].error)
         self.assertEqual(samples[1].readings.count(), 1)
+
+    def test_failed_supply_readback_is_retried_then_sweep_continues(self):
+        """Two PSU readback timeouts fail one sample, not the whole task."""
+        task = AutomationTask.objects.create(
+            user=self.user,
+            name="Recover after PSU timeout",
+            measurement_mode=AutomationTask.MeasurementMode.CONTINUOUS,
+            interval_seconds=0.01,
+        )
+        TaskInstrument.objects.create(
+            task=task,
+            instrument=self.power_supply,
+            configuration={
+                "mode": "sweep",
+                "start_voltage": "0.000",
+                "stop_voltage": "1.000",
+                "voltage_step": "1.000",
+                "cycle_count": 1,
+                "readback_voltage": True,
+            },
+        )
+
+        with patch(
+            "drivers.mock_dc_power_supply.MockDCPowerSupplyDriver."
+            "measure_output_voltage",
+            autospec=True,
+            side_effect=(
+                CommunicationError("timeout one"),
+                CommunicationError("timeout two"),
+                1.0,
+            ),
+        ):
+            run_automation_task(task.pk)
+
+        task.refresh_from_db()
+        samples = list(task.samples.order_by("index"))
+        self.assertEqual(task.status, AutomationTask.Status.COMPLETED)
+        self.assertEqual(
+            [sample.status for sample in samples],
+            [TaskSample.Status.FAILED, TaskSample.Status.COMPLETED],
+        )
+        self.assertIn("after 2 attempts", samples[0].error)
+        self.assertEqual(
+            samples[1].readings.get(
+                parameter="Output voltage readback",
+            ).value,
+            Decimal("1.000000"),
+        )

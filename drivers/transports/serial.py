@@ -97,7 +97,11 @@ class SerialTransport(InstrumentTransport):
                     self.connection.in_waiting <= 0
                     and time.monotonic() < deadline
                 ):
-                    time.sleep(0.1)
+                    # Poll frequently: environmental controllers answer in
+                    # milliseconds, and a 100 ms quantum multiplied across
+                    # several readings made one sample appear needlessly
+                    # slow.
+                    time.sleep(0.005)
                 if self.connection.in_waiting <= 0:
                     raise CommunicationError("The serial response timed out.")
             if self.response_termination is None:

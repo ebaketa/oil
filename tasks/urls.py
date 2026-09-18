@@ -7,6 +7,11 @@ from . import views
 urlpatterns = [
     path("tasks/", views.task_list, name="task_list"),
     path("tasks/create/", views.task_create, name="task_create"),
+    path(
+        "tasks/instruments/<int:pk>/bmx280-sensors/",
+        views.bmx280_sensor_inventory,
+        name="bmx280_sensor_inventory",
+    ),
     path("tasks/<int:pk>/", views.task_detail, name="task_detail"),
     path(
         "tasks/<int:pk>/chart/",
@@ -14,6 +19,7 @@ urlpatterns = [
         name="task_chart_data",
     ),
     path("tasks/<int:pk>/stop/", views.task_stop, name="task_stop"),
+    path("tasks/<int:pk>/restart/", views.task_restart, name="task_restart"),
     path(
         "tasks/<int:pk>/complete/",
         views.task_complete,

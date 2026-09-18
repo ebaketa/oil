@@ -128,6 +128,7 @@ class AutomationTask(models.Model):
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
     error = models.TextField(blank=True)
+    sample_count = models.PositiveBigIntegerField(default=0)
 
     class Meta:
         ordering = ("-created_at", "-pk")

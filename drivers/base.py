@@ -57,6 +57,19 @@ class BaseInstrumentDriver(ABC):
     def __init__(self) -> None:
         """Create a disconnected driver."""
         self.connected = False
+        self._command_log: list[str] = []
+
+    def _record_command(self, command: str) -> None:
+        """Keep a bounded trace of commands sent to the instrument."""
+        self._command_log.append(command)
+        if len(self._command_log) > 500:
+            self._command_log = self._command_log[-500:]
+
+    def drain_command_log(self) -> list[str]:
+        """Return and clear commands recorded since the previous drain."""
+        commands = self._command_log
+        self._command_log = []
+        return commands
 
     def __enter__(self):
         """Connect and return the driver for use in a context manager."""

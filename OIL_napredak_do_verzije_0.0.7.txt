@@ -1,0 +1,89 @@
+OIL - PREGLED NAPRETKA DO VERZIJE 0.0.7
+=========================================
+
+Do verzije 0.0.7 napravili smo velik i stabilan temelj sustava.
+
+
+STATISTIKA
+----------
+
+Objavljene verzije:                         7
+Release commitovi:                         7
+Datoteke izvornog koda i dokumentacije:  112
+Ukupno redaka:                         oko 9.532
+Python:                       82 datoteke / 6.690 redaka
+HTML predlošci:               13 datoteka / 1.136 redaka
+JavaScript:                    6 datoteka /   564 retka
+Dokumentacija:                 8 datoteka /   941 redak
+Shell skripte:                 3 datoteke /   201 redak
+Django migracije:                          9
+Automatski testovi:                      148
+Rezultat testova:                svi prolaze
+
+Od verzije 0.0.1 do verzije 0.0.7 promijenjeno je 109 datoteka,
+dodano je 8.550 redaka, a uklonjena su 242 retka.
+
+Veliko brisanje i premještanje u verziji 0.0.6 rezultat je izdvajanja
+Django aplikacija po domenama, a ne gubitka funkcionalnosti.
+
+
+NAPREDAK PO VERZIJAMA
+---------------------
+
+Verzija 0.0.1
+Osnovna Django aplikacija, korisnici, teme i dokumentacija.
+
+Verzija 0.0.2
+Instrument driveri i inventar.
+
+Verzija 0.0.3
+Spajanje, odspajanje, testiranje instrumenata i mjerenja.
+
+Verzija 0.0.4
+Single, Continuous i Loop mjerenja.
+
+Verzija 0.0.5
+MeasurementRun, Driver Registry, Mock driver i capability sustav.
+
+Verzija 0.0.6
+Django domenske aplikacije, zajednički transportni sloj, JSON API
+i CSV izvoz.
+
+Verzija 0.0.7
+Prijenosna systemd instalacija na proizvoljnom serveru, neovisna
+o korisniku i lokaciji repozitorija.
+
+
+TRENUTNE MOGUĆNOSTI
+-------------------
+
+- Agilent 34401A, Keysight 34461A i Mock driveri
+- mjerenje DC napona, AC napona i otpora
+- zajednički Serial/FTDI, USBTMC i Mock transportni sloj
+- Single, Continuous i Loop mjerenja
+- spremanje rezultata u bazu podataka
+- globalni CSV izvoz spremljenih mjerenja
+- zaseban CSV izvoz za svaki mjerni workflow
+- prijava korisnika, korisnički profili i teme
+- inventar, povezivanje i testiranje instrumenata
+- session-authenticated JSON API
+- sigurna konfiguracija kroz privatnu .env datoteku
+- MkDocs dokumentacija
+- automatska systemd instalacija neovisna o korisniku i lokaciji
+- 148 automatskih testova
+
+
+ZAKLJUČAK
+---------
+
+OIL više nije samo prototip za izvođenje jednog mjerenja. Projekt sada
+predstavlja funkcionalnu i testiranu osnovu laboratorijskog sustava za
+upravljanje instrumentima, izvođenje mjernih postupaka, spremanje rezultata,
+izvoz podataka i povezivanje s drugim aplikacijama kroz JSON API.
+
+
+GitHub:
+https://github.com/ebaketa/oil
+
+Verzija 0.0.7:
+https://github.com/ebaketa/oil/releases/tag/v0.0.7

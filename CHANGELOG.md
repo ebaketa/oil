@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added BTDL-NTC, BTDL-DS18B20, and BTDL-BMx280 environmental drivers with
+  capability metadata, sensor discovery, validation, and task integration.
+- Added DS1820/DS18S20 and DS18B20 temperature selection with sensor-specific
+  rounding (0.5 °C and 0.1 °C) and selectable DS18B20 resolution from 9 to 12
+  bits.
+- Added BMx280 sensor inventory discovery for BMP280 and BME280 channels.
+  Tasks can independently log temperature, humidity, and pressure values that
+  are actually available on each detected sensor.
+- Added one-trigger BMx280 acquisition through the firmware's `READ?` response,
+  which returns all channel values in one transaction.
+- Added up to five independent task chart Y-axes. Each selected measurement can
+  be assigned to Primary, Secondary, Axis 3, Axis 4, or Axis 5.
 - Added responsive DMM panels with local continuous measurement, single
   trigger, driver-backed range controls, live Task-owned read-only values,
   statistics, trigger activity, and an automatically scaled graph.
@@ -51,6 +63,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- BMx280 task columns now use detected sensor names (BMP280/BME280) and group
+  Temperature, Humidity, and Pressure beneath the corresponding sensor.
+- Serial response polling now checks for fast environmental-controller replies
+  every 5 ms instead of 100 ms; this does not issue additional triggers.
 - Renamed the generic Mock instrument to Mock DMM, including its driver key and
   address scheme, with data migrations for existing inventory records.
 - Instrument lists are now ordered by database ID and distinguish the

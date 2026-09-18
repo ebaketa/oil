@@ -124,9 +124,30 @@
             .flatMap(
                 (dataset) => dataset.points.filter((value) => value !== null),
             );
-        const primaryValues = valuesForAxis("primary");
-        const secondaryValues = valuesForAxis("secondary");
-        const values = [...primaryValues, ...secondaryValues];
+        const axisIds = ["primary", "secondary", "axis3", "axis4", "axis5"];
+        const axisValues = Object.fromEntries(
+            axisIds.map((axis) => [axis, valuesForAxis(axis)]),
+        );
+        const values = axisIds.flatMap((axis) => axisValues[axis]);
+        const decimalsForAxis = (axis) => {
+            const decimals = datasets
+                .filter(
+                    (dataset) => (
+                        dataset.column.axis || "primary"
+                    ) === axis,
+                )
+                .map((dataset) => dataset.column.decimals)
+                .filter(Number.isInteger);
+            return decimals.length ? Math.max(...decimals) : null;
+        };
+        const axisDecimals = Object.fromEntries(
+            axisIds.map((axis) => [axis, decimalsForAxis(axis)]),
+        );
+        const formatAxisValue = (value, axis) => (
+            Number.isInteger(axisDecimals[axis])
+                ? value.toFixed(axisDecimals[axis])
+                : String(Number(value.toPrecision(6)))
+        );
 
         legend.replaceChildren();
         datasets.forEach((dataset) => {
@@ -156,31 +177,48 @@
             context.setTransform(ratio, 0, 0, ratio, 0, 0);
             context.clearRect(0, 0, width, height);
 
-            const hasSecondary = secondaryValues.length > 0;
+            const activeAxes = axisIds.filter(
+                (axis) => axisValues[axis].length > 0,
+            );
+            const leftAxes = activeAxes.filter(
+                (axis) => axisIds.indexOf(axis) % 2 === 0,
+            );
+            const rightAxes = activeAxes.filter(
+                (axis) => axisIds.indexOf(axis) % 2 === 1,
+            );
             const plot = {
-                left: hasSecondary ? 136 : 72,
-                right: width - 18,
+                left: 8 + leftAxes.length * 64,
+                right: width - 8 - rightAxes.length * 64,
                 top: 12,
                 bottom: 118,
             };
-            const scaleFor = (axisValues) => {
+            const scaleFor = (axisValues, decimals) => {
                 if (!axisValues.length) {
                     return null;
                 }
                 let minimum = Math.min(...axisValues);
                 let maximum = Math.max(...axisValues);
                 const span = maximum - minimum;
-                const margin = span > 0
+                let margin = span > 0
                     ? span * 0.08
                     : Math.max(Math.abs(maximum) * 0.001, 0.001);
+                if (Number.isInteger(decimals)) {
+                    const resolution = 10 ** -decimals;
+                    margin = Math.max(
+                        margin,
+                        (5 * resolution - span) / 2,
+                    );
+                }
                 minimum -= margin;
                 maximum += margin;
                 return {minimum, maximum};
             };
-            const scales = {
-                primary: scaleFor(primaryValues),
-                secondary: scaleFor(secondaryValues),
-            };
+            const scales = Object.fromEntries(
+                axisIds.map((axis) => [
+                    axis,
+                    scaleFor(axisValues[axis], axisDecimals[axis]),
+                ]),
+            );
 
             const styles = getComputedStyle(canvas);
             const foreground = styles.color || "#212529";
@@ -204,28 +242,26 @@
                 context.moveTo(plot.left, y);
                 context.lineTo(plot.right, y);
                 context.stroke();
-                context.textAlign = "right";
                 context.textBaseline = "middle";
-                if (scales.primary) {
-                    const primaryValue = scales.primary.minimum + fraction * (
-                        scales.primary.maximum - scales.primary.minimum
+                activeAxes.forEach((axis) => {
+                    const scale = scales[axis];
+                    const onLeft = leftAxes.includes(axis);
+                    const sideIndex = (onLeft ? leftAxes : rightAxes).indexOf(
+                        axis,
                     );
+                    const labelX = onLeft
+                        ? plot.left - 8 - sideIndex * 64
+                        : plot.right + 8 + sideIndex * 64;
+                    const axisValue = scale.minimum + fraction * (
+                        scale.maximum - scale.minimum
+                    );
+                    context.textAlign = onLeft ? "right" : "left";
                     context.fillText(
-                        primaryValue.toPrecision(6),
-                        plot.left - 8,
+                        formatAxisValue(axisValue, axis),
+                        labelX,
                         y,
                     );
-                }
-                if (scales.secondary) {
-                    const secondaryValue = scales.secondary.minimum + fraction * (
-                        scales.secondary.maximum - scales.secondary.minimum
-                    );
-                    context.fillText(
-                        secondaryValue.toPrecision(6),
-                        plot.left - 72,
-                        y,
-                    );
-                }
+                });
             }
 
             const xFor = (index) => plot.left + (
@@ -630,6 +666,131 @@
             return;
         }
 
+        if (instrument.driver === "btdl_bmx280") {
+            const functionField = document.createElement("input");
+            functionField.type = "hidden";
+            functionField.value = "environment";
+            functionField.dataset.configName = "function";
+            fields.append(functionField);
+
+            const valuesWrapper = document.createElement("div");
+            valuesWrapper.className = "col-12";
+            const valuesLabel = document.createElement("div");
+            valuesLabel.className = "form-label";
+            valuesLabel.textContent = "Values to log";
+            const values = document.createElement("div");
+            values.className = "row g-2";
+            const status = document.createElement("div");
+            status.className = "small text-muted";
+            status.textContent = "Reading sensors from the instrument…";
+            valuesWrapper.append(valuesLabel, values, status);
+            fields.append(valuesWrapper);
+
+            fetch(instrument.sensor_inventory_url, {
+                headers: {"X-Requested-With": "XMLHttpRequest"},
+            }).then(async (response) => {
+                const payload = await response.json();
+                if (!response.ok) {
+                    throw new Error(payload.error || "Could not read sensors.");
+                }
+                const quantityLabels = {
+                    temperature: "Temperature",
+                    humidity: "Humidity",
+                    pressure: "Pressure",
+                };
+                const sensorTypeCounts = payload.sensors.reduce(
+                    (counts, sensor) => {
+                        counts[sensor.type] = (counts[sensor.type] || 0) + 1;
+                        return counts;
+                    },
+                    {},
+                );
+                const sensorTypes = {};
+                payload.sensors.forEach((sensor) => {
+                    sensorTypes[String(sensor.channel)] = sensor.type;
+                    const sensorWrapper = document.createElement("section");
+                    sensorWrapper.className = "col-md-6";
+                    const sensorCard = document.createElement("div");
+                    sensorCard.className = "border rounded p-3 h-100";
+                    const sensorHeading = document.createElement("div");
+                    sensorHeading.className = "fw-semibold mb-2";
+                    sensorHeading.textContent = (
+                        `${instrument.name} ${sensor.type}`
+                        + (sensorTypeCounts[sensor.type] > 1
+                            ? ` (${sensor.address})`
+                            : "")
+                    );
+                    sensorCard.append(sensorHeading);
+                    ["temperature", "humidity", "pressure"]
+                        .filter((quantity) => (
+                            sensor.quantities.includes(quantity)
+                        ))
+                        .forEach((quantity) => {
+                            const measurement = (
+                                `${quantity}_${sensor.channel}`
+                            );
+                            const check = document.createElement("div");
+                            check.className = (
+                                "d-flex align-items-center gap-2 mb-2"
+                            );
+                            const checkControl = document.createElement("div");
+                            checkControl.className = "form-check flex-grow-1";
+                            const input = document.createElement("input");
+                            input.className = "form-check-input";
+                            input.type = "checkbox";
+                            input.checked = quantity === "temperature";
+                            input.value = measurement;
+                            input.id = `${panel.id}-${measurement}`;
+                            input.dataset.configName = "measurements";
+                            input.dataset.configMultiple = "true";
+                            const label = document.createElement("label");
+                            label.className = "form-check-label";
+                            label.htmlFor = input.id;
+                            label.textContent = quantityLabels[quantity];
+                            checkControl.append(input, label);
+                            const axisSelect = document.createElement("select");
+                            axisSelect.className = "form-select form-select-sm";
+                            axisSelect.style.width = "8rem";
+                            [
+                                ["primary", "Axis 1"],
+                                ["secondary", "Axis 2"],
+                                ["axis3", "Axis 3"],
+                                ["axis4", "Axis 4"],
+                                ["axis5", "Axis 5"],
+                            ].forEach(([value, text]) => {
+                                const option = document.createElement("option");
+                                option.value = value;
+                                option.textContent = text;
+                                axisSelect.append(option);
+                            });
+                            axisSelect.value = {
+                                temperature: "primary",
+                                humidity: "secondary",
+                                pressure: "axis3",
+                            }[quantity];
+                            axisSelect.dataset.configMap = "measurement_axes";
+                            axisSelect.dataset.configKey = measurement;
+                            check.append(checkControl, axisSelect);
+                            sensorCard.append(check);
+                        });
+                    sensorWrapper.append(sensorCard);
+                    values.append(sensorWrapper);
+                });
+                const sensorTypesField = document.createElement("input");
+                sensorTypesField.type = "hidden";
+                sensorTypesField.value = JSON.stringify(sensorTypes);
+                sensorTypesField.dataset.configName = "sensor_types";
+                fields.append(sensorTypesField);
+                status.textContent = payload.sensors.length
+                    ? "Select one or more values."
+                    : "No BMx280 sensors were detected.";
+            }).catch((error) => {
+                status.className = "small text-danger";
+                status.textContent = error.message;
+            });
+            return;
+        }
+
         if (Object.keys(instrument.capabilities).length) {
             const capabilityOptions = Object.entries(
                 instrument.capabilities,
@@ -669,18 +830,49 @@
                     ],
                 )
                 : null;
-            if (instrument.driver === "rpi_cpu_temperature") {
-                addField(
+            const instrumentResolution = [
+                "agilent_34401a",
+                "keysight_34461a",
+            ].includes(instrument.driver)
+                ? addField(
                     fields,
+                    "Measurement resolution",
+                    "measurement_resolution",
+                    "5.5",
+                    [
+                        ["4.5", "4½ digit"],
+                        ["5.5", "5½ digit"],
+                        ["6.5", "6½ digit"],
+                    ],
+                )
+                : null;
+            const ds18b20Resolution = instrument.driver === "btdl_ds18b20"
+                ? addField(
+                    fields,
+                    "DS18B20 resolution",
+                    "ds18b20_resolution_bits",
+                    "12",
+                    [
+                        ["9", "9 bit"],
+                        ["10", "10 bit"],
+                        ["11", "11 bit"],
+                        ["12", "12 bit"],
+                    ],
+                )
+                : null;
+            addField(
+                fields,
                     "Chart Y-axis",
                     "chart_axis",
                     "primary",
-                    [
-                        ["primary", "Primary"],
-                        ["secondary", "Secondary"],
-                    ],
-                );
-            }
+                [
+                    ["primary", "Primary"],
+                    ["secondary", "Secondary"],
+                    ["axis3", "Axis 3"],
+                    ["axis4", "Axis 4"],
+                    ["axis5", "Axis 5"],
+                ],
+            );
             if ([
                 "agilent_34401a",
                 "keysight_34461a",
@@ -735,6 +927,28 @@
                 countMode?.closest(".col-md-6").classList.toggle(
                     "d-none",
                     !countModeVisible,
+                );
+                const instrumentResolutionVisible = (
+                    ["agilent_34401a", "keysight_34461a"].includes(
+                        instrument.driver,
+                    )
+                    && ["dc_voltage", "resistance"].includes(
+                        functionField.value,
+                    )
+                );
+                instrumentResolution?.closest(".col-md-6").classList.toggle(
+                    "d-none",
+                    !instrumentResolutionVisible,
+                );
+                const ds18b20ResolutionVisible = (
+                    instrument.driver === "btdl_ds18b20"
+                    && ["temperature_ds18b20", "temperatures"].includes(
+                        functionField.value,
+                    )
+                );
+                ds18b20Resolution?.closest(".col-md-6").classList.toggle(
+                    "d-none",
+                    !ds18b20ResolutionVisible,
                 );
             };
             functionField.addEventListener("change", updateTemperatureFields);
@@ -840,7 +1054,22 @@
             const configuration = {};
             entry.panel.querySelectorAll("[data-config-name]").forEach(
                 (field) => {
-                    configuration[field.dataset.configName] = field.value;
+                    if (field.dataset.configMultiple === "true") {
+                        const name = field.dataset.configName;
+                        configuration[name] ||= [];
+                        if (field.checked) {
+                            configuration[name].push(field.value);
+                        }
+                    } else {
+                        configuration[field.dataset.configName] = field.value;
+                    }
+                },
+            );
+            entry.panel.querySelectorAll("[data-config-map]").forEach(
+                (field) => {
+                    const name = field.dataset.configMap;
+                    configuration[name] ||= {};
+                    configuration[name][field.dataset.configKey] = field.value;
                 },
             );
             return {
@@ -1058,6 +1287,10 @@
         stopButton.classList.toggle(
             "d-none",
             !["pending", "running"].includes(task.status),
+        );
+        pane.querySelector(".task-restart-button").classList.toggle(
+            "d-none",
+            task.status !== "failed",
         );
         pane.querySelector(".task-complete-button").classList.toggle(
             "d-none",
@@ -1314,6 +1547,45 @@
                     );
                     stopButton.disabled = false;
                     stopButton.textContent = "Stop";
+                }
+            },
+        );
+        pane.querySelector(".task-restart-button").addEventListener(
+            "click",
+            async () => {
+                const confirmed = window.confirm(
+                    `Restart task "${task.name}" from the next sample?`,
+                );
+                if (!confirmed) return;
+                const restartButton = pane.querySelector(
+                    ".task-restart-button",
+                );
+                restartButton.disabled = true;
+                restartButton.textContent = "Restarting…";
+                try {
+                    const csrfToken = document.querySelector(
+                        '[name="csrfmiddlewaretoken"]',
+                    ).value;
+                    const response = await fetch(
+                        `/tasks/${taskId}/restart/`,
+                        {
+                            method: "POST",
+                            headers: {"X-CSRFToken": csrfToken},
+                        },
+                    );
+                    const payload = await response.json();
+                    if (!response.ok) {
+                        throw new Error(
+                            payload.error || "Task could not be restarted.",
+                        );
+                    }
+                    renderTaskData(pane, payload);
+                } catch (error) {
+                    pane.querySelector(".task-detail-error").textContent = (
+                        error.message
+                    );
+                    restartButton.disabled = false;
+                    restartButton.textContent = "Restart";
                 }
             },
         );

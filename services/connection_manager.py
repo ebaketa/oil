@@ -102,6 +102,22 @@ class ConnectionManager:
 
     @classmethod
     @contextmanager
+    def persistent_session(
+        cls,
+        instrument: "Instrument",
+    ) -> Iterator[BaseInstrumentDriver]:
+        """Yield a locked connection that remains open for a panel lease."""
+        instrument_id = cls._instrument_id(instrument)
+        with cls._lock_for(instrument):
+            driver = cls.connect(instrument)
+            try:
+                yield driver
+            except Exception:
+                cls._disconnect_locked(instrument_id)
+                raise
+
+    @classmethod
+    @contextmanager
     def temporary_session(
         cls,
         instrument: "Instrument",

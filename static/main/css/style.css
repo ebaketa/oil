@@ -493,7 +493,7 @@ body.dmm-panel-page {
 .dmm-sample-position { text-align: right; }
 .dmm-reading-row { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; justify-content: center; overflow: hidden; }
 .dmm-reading-value { display: flex; min-width: 0; align-items: baseline; }
-.dmm-reading { display: inline-flex; align-items: center; font-family: "Roboto Condensed", "Arial Narrow", Arial, sans-serif; font-size: 6rem; font-stretch: condensed; font-weight: 400; line-height: 1; white-space: nowrap; }
+.dmm-reading { display: inline-flex; align-items: center; max-width: 100%; font-family: "Roboto Condensed", "Arial Narrow", Arial, sans-serif; font-size: 5rem; font-stretch: condensed; font-weight: 400; line-height: 1; white-space: nowrap; }
 .dmm-sign { font-size: 0.6667em; line-height: 1; }
 .dmm-digit-gap { display: inline-block; width: 0.5ch; }
 .dmm-unit { font-size: 3rem; line-height: 1; }
@@ -515,6 +515,30 @@ body.dmm-panel-page {
 .dmm-control-bank { display: flex; align-items: center; }
 .dmm-control-bank > * { width: 100%; }
 .dmm-controls .btn.active { color: #212529; background: #d8ffb2; }
+.dmm-command-console-wrap {
+    border-top: 1px solid #59616a;
+    padding: 0.45rem 0.65rem 0.6rem;
+}
+.dmm-command-console-title {
+    color: #aeb7c0;
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.25rem;
+}
+.dmm-command-console {
+    background: #101418;
+    border: 1px solid #4d565f;
+    border-radius: 0.25rem;
+    color: #9ef59e;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.75rem;
+    height: 7rem;
+    line-height: 1.35;
+    margin: 0;
+    overflow: auto;
+    padding: 0.45rem 0.55rem;
+    white-space: pre-wrap;
+}
 .dmm-panel .btn-outline-light {
     --bs-btn-color: var(--oil-text);
     --bs-btn-border-color: var(--oil-border);

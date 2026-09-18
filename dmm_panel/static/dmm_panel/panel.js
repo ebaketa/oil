@@ -6,12 +6,18 @@
     const label = panel.querySelector(".dmm-function-label");
     const headerRange = panel.querySelector(".dmm-header-range");
     const range = panel.querySelector(".dmm-range");
+    const readOnlyInfo = panel.querySelector(".dmm-read-only-info");
     const setError = (message) => {
         panel.dataset.error = message;
     };
     const livePosition = panel.querySelector(".dmm-live-position");
     const continuousButton = panel.querySelector(".dmm-continuous");
     const resolutionButton = panel.querySelector(".dmm-resolution");
+    const resolutionChoiceButtons = panel.querySelectorAll(
+        ".dmm-resolution-choice",
+    );
+    const nplcButton = panel.querySelector(".dmm-nplc");
+    const clsButton = panel.querySelector(".dmm-cls");
     const triggerMode = panel.querySelector(".dmm-trigger-mode");
     const samplePosition = panel.querySelector(".dmm-sample-position");
     const autoRangeButton = panel.querySelector(".dmm-auto-range");
@@ -19,6 +25,7 @@
     const rangeDownButton = panel.querySelector(".dmm-range-down");
     const chart = panel.querySelector(".dmm-chart-canvas");
     const triggerLight = panel.querySelector(".dmm-trigger-light");
+    const commandConsole = panel.querySelector(".dmm-command-console");
     const countModes = JSON.parse(
         document.querySelector("#dmm-count-modes")?.textContent || "{}",
     );
@@ -26,15 +33,35 @@
         document.querySelector("#dmm-count-mode-labels")?.textContent || "{}",
     );
     const countModeNames = Object.keys(countModes);
+    const instrumentResolutionModes = ["4.5", "5.5", "6.5"];
+    const agilentResolutionModes = [
+        "4.5_fast", "4.5_slow", "5.5_fast",
+        "5.5_slow", "6.5_fast", "6.5_slow",
+    ];
+    const resolutionModeLabel = (mode) => {
+        if (!mode) return "Resolution Custom";
+        if (mode === "5.5_slow_or_6.5_fast") {
+            return "Resolution 5½ Slow / 6½ Fast";
+        }
+        const [digits, speed] = mode.split("_");
+        return `Resolution ${digits.replace(".5", "½")} ${
+            speed === "fast" ? "Fast" : "Slow"
+        }`;
+    };
+    const instrumentNplcModes = ["0.02", "0.2", "1", "2", "10", "20", "100", "200"];
     let selectedFunction = panel.querySelector(".dmm-function")?.dataset.function;
     let selectedRange = "auto";
     let selectedCountMode = countModeNames[0] || "50000";
     let timer = null;
+    let continuousRun = 0;
     let hold = false;
     let localSampleCount = 0;
     let values = [];
     let lastLiveSampleId = null;
     let displayDecimals = 3;
+    let displayScale = 1;
+    let displayDecimalOffset = 0;
+    let displayIntegerDigits = 1;
     let chartStatistics = null;
     let chartZoom = 1;
     let chartScaleMode = "full";
@@ -42,10 +69,67 @@
     let fittedReadingFontSize = 96;
     let taskVoltageRanges = countModes[selectedCountMode] || null;
     let readOnlyResolutionOverride = false;
+    let selectedInstrumentResolution = "6.5";
+    let selectedInstrumentResolutionMode = "6.5_fast";
+    let selectedInstrumentNplc = "10";
+    let instrumentStatusTrigger = null;
+    let instrumentStatusReading = false;
+    let panelOperationInProgress = false;
+    let panelStateRevision = 0;
+    let panelViewer = false;
+    let commandSequence = 0;
+    const updateResolutionChoices = () => {
+        const ambiguous = (
+            selectedInstrumentResolutionMode === "5.5_slow_or_6.5_fast"
+        );
+        const [digits, speed] = selectedInstrumentResolutionMode.split("_");
+        resolutionChoiceButtons.forEach((button) => {
+            const selected = !ambiguous && (
+                button.dataset.resolutionDigits === digits
+                || button.dataset.resolutionSpeed === speed
+            );
+            button.classList.toggle("active", selected);
+        });
+    };
+    const panelToken = globalThis.crypto?.randomUUID?.()
+        || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const readOnly = panel.dataset.readOnly === "true";
+    const readsInstrumentStatus = (
+        panel.dataset.readsInstrumentStatus === "true"
+    );
+    const navigationEntry = performance.getEntriesByType?.("navigation")?.[0];
+    const initialContinuousDelay = navigationEntry?.type === "reload"
+        ? 5000
+        : 1000;
+    const extraDisplayDigits = Number.parseInt(
+        panel.dataset.extraDisplayDigits || "0",
+        10,
+    ) || 0;
+    const payloadDecimals = (payload, fallback = 3) => {
+        const decimals = Number.isInteger(payload.decimals)
+            ? payload.decimals
+            : fallback;
+        return decimals + (
+            payload.resolution_mode === "6.5_slow" ? extraDisplayDigits : 0
+        );
+    };
     const resolutionButtonText = (countMode) => (
         `Resolution ${countModeLabels[countMode] || countMode}`
     );
+    const appendCommands = (commands) => {
+        if (!commandConsole || !Array.isArray(commands) || !commands.length) {
+            return;
+        }
+        const lines = commandConsole.textContent
+            .split("\n")
+            .filter(Boolean);
+        commands.forEach((command) => {
+            commandSequence += 1;
+            lines.push(`${commandSequence} > ${command}`);
+        });
+        commandConsole.textContent = `${lines.slice(-200).join("\n")}\n`;
+        commandConsole.scrollTop = commandConsole.scrollHeight;
+    };
 
     const countModeDecimals = (value, countMode) => {
         const ranges = countModes[countMode] || [];
@@ -85,17 +169,58 @@
         const selectedIndex = selectedRange === "auto"
             ? inferredRangeIndex(ranges)
             : ranges.indexOf(Number(selectedRange));
-        autoRangeButton.disabled = readOnly || !supportsAutorange;
+        autoRangeButton.disabled = readOnly || panelViewer || !supportsAutorange;
         rangeUpButton.disabled = (
-            readOnly || !hasRanges || selectedIndex >= ranges.length - 1
+            readOnly || panelViewer || !hasRanges
+            || selectedIndex >= ranges.length - 1
         );
-        rangeDownButton.disabled = readOnly || !hasRanges || selectedIndex <= 0;
+        rangeDownButton.disabled = (
+            readOnly || panelViewer || !hasRanges || selectedIndex <= 0
+        );
         autoRangeButton.classList.toggle("active", selectedRange === "auto");
         if (resolutionButton) {
-            resolutionButton.disabled = (
-                selectedFunction !== "dc_voltage" || countModeNames.length < 2
+            const supportsInstrumentResolution = readsInstrumentStatus && (
+                selectedFunction === "dc_voltage"
+                || selectedFunction === "dc_current"
+                || selectedFunction === "resistance"
+                || selectedFunction === "resistance_4w"
             );
+            resolutionButton.disabled = readOnly || panelViewer || (
+                !supportsInstrumentResolution
+                && (selectedFunction !== "dc_voltage" || countModeNames.length < 2)
+            );
+            resolutionChoiceButtons.forEach((button) => {
+                button.disabled = resolutionButton.disabled;
+            });
         }
+        if (nplcButton) {
+            const supportsNplc = [
+                "dc_voltage", "dc_current", "resistance", "resistance_4w",
+            ].includes(selectedFunction);
+            nplcButton.disabled = readOnly || panelViewer || !supportsNplc
+                || panel.dataset.supportsNplcControl !== "true";
+        }
+        if (clsButton) clsButton.disabled = readOnly || panelViewer;
+        updateResolutionChoices();
+    };
+
+    const setPanelViewer = (enabled) => {
+        panelViewer = enabled;
+        panel.querySelectorAll(".dmm-function").forEach((button) => {
+            button.disabled = enabled || button.dataset.available !== "true";
+        });
+        [".dmm-trigger", ".dmm-hold", ".dmm-reset-stats"].forEach(
+            (selector) => {
+                const button = panel.querySelector(selector);
+                if (button) button.disabled = enabled;
+            },
+        );
+        if (readOnlyInfo) {
+            readOnlyInfo.textContent = enabled
+                ? "Remote · Read Only"
+                : "Remote Control";
+        }
+        updateRangeControls();
     };
 
     const pulseTrigger = () => {
@@ -110,20 +235,8 @@
         if (!row || !reading) return;
         row.style.paddingInline = "0";
         const availableWidth = Math.max(0, row.clientWidth - 16);
-        if (panel.getBoundingClientRect().width > 799) {
-            fittedReadingWidth = availableWidth;
-            fittedReadingFontSize = 96;
-            reading.style.fontSize = "96px";
-            if (unit) unit.style.fontSize = "48px";
-            return;
-        }
-        if (
-            fittedReadingWidth === null
-            || Math.abs(fittedReadingWidth - availableWidth) > 1
-        ) {
-            fittedReadingWidth = availableWidth;
-            fittedReadingFontSize = 96;
-        }
+        fittedReadingWidth = availableWidth;
+        fittedReadingFontSize = 80;
         reading.style.fontSize = `${fittedReadingFontSize}px`;
         if (unit) unit.style.fontSize = `${fittedReadingFontSize / 2}px`;
         const readingWidth = reading.getBoundingClientRect().width;
@@ -162,7 +275,9 @@
         const rangePadding = statisticRange > 0
             ? statisticRange * 0.4
             : Math.max(Math.abs(statisticMinimum) * 0.4, 0.001);
-        const isVoltage = unit.textContent.trim().startsWith("V");
+        const isVoltage = ["dc_voltage", "ac_voltage"].includes(
+            selectedFunction,
+        );
         const visibleAverage = visible.reduce(
             (sum, value) => sum + value,
             0,
@@ -316,9 +431,18 @@
         drawChart();
     });
 
-    const format = (value, decimals = displayDecimals) => (
-        Number(value).toFixed(decimals)
-    );
+    const format = (value, decimals = displayDecimals) => {
+        const fixed = (Number(value) * displayScale).toFixed(
+            Math.max(0, decimals - displayDecimalOffset),
+        );
+        const sign = fixed.startsWith("-") ? "-" : "";
+        const unsigned = sign ? fixed.slice(1) : fixed;
+        const [integer, fraction] = unsigned.split(".");
+        const padded = integer.padStart(displayIntegerDigits, "0");
+        return `${sign}${padded}${
+            fraction === undefined ? "" : `.${fraction}`
+        }`;
+    };
     const formatReading = (value, decimals = displayDecimals) => {
         const formatted = format(value, decimals);
         return Number(value) >= 0 ? `+${formatted}` : formatted;
@@ -352,25 +476,69 @@
             reading.append(document.createTextNode(digits));
         }
     };
-    const formatRange = (value, rangeUnit) => (
-        rangeUnit === "V" && Number(value) < 1
-            ? `${Number(value) * 1000} mV`
-            : `${Number(value)} ${rangeUnit}`
-    );
+    const formatRange = (value, rangeUnit) => {
+        if (!["V", "A"].includes(rangeUnit)) {
+            return `${Number(value)} ${rangeUnit}`;
+        }
+        const displayUnit = selectedFunctionButton()?.dataset.displayUnit
+            || rangeUnit;
+        return Number(value) < 1
+            ? `${Number(value) * 1000} m${displayUnit}`
+            : `${Number(value)} ${displayUnit}`;
+    };
     const updateRange = (payload) => {
         let rangeText;
+        let activeRange;
+        const hasReportedRange = (
+            payload.range_value !== null
+            && payload.range_value !== undefined
+            && Number.isFinite(Number(payload.range_value))
+        );
         if (payload.autorange !== false) {
             const ranges = availableRanges();
+            const reportedRange = Number(payload.range_value);
             const absoluteValue = Math.abs(Number(payload.value));
-            const activeRange = ranges.find(
-                (candidate) => absoluteValue <= candidate,
-            ) ?? ranges.at(-1);
+            activeRange = (
+                payload.range_value !== null
+                && payload.range_value !== undefined
+                && Number.isFinite(reportedRange)
+                && reportedRange > 0
+            )
+                ? reportedRange
+                : (ranges.find(
+                    (candidate) => absoluteValue <= candidate,
+                ) ?? ranges.at(-1));
             rangeText = activeRange === undefined
                 ? "AUTO"
                 : `AUTO ${formatRange(activeRange, payload.unit)}`;
-        } else {
+        } else if (hasReportedRange) {
+            activeRange = Number(payload.range_value);
             rangeText = formatRange(payload.range_value, payload.unit);
+        } else {
+            rangeText = "FIXED";
         }
+        const baseDisplayUnit = selectedFunctionButton()?.dataset.displayUnit
+            || payload.unit;
+        const useMilliUnit = (
+            ["V", "A"].includes(payload.unit)
+            && Number.isFinite(activeRange)
+            && activeRange < 1
+        );
+        displayScale = useMilliUnit ? 1000 : 1;
+        displayDecimalOffset = useMilliUnit ? 3 : 0;
+        const displayedRange = Number(activeRange) * displayScale;
+        displayIntegerDigits = (
+            [
+                "dc_voltage", "ac_voltage", "dc_current", "ac_current",
+            ].includes(selectedFunction)
+            && Number.isFinite(displayedRange)
+            && displayedRange > 0
+        )
+            ? Math.floor(Math.log10(displayedRange)) + 1
+            : 1;
+        unit.textContent = useMilliUnit
+            ? `m${baseDisplayUnit}`
+            : baseDisplayUnit;
         headerRange.textContent = rangeText;
         if (range) range.textContent = rangeText;
         updateRangeControls();
@@ -389,6 +557,7 @@
             function: selectedFunction,
             range: selectedRange,
             count_mode: selectedCountMode,
+            panel_token: panelToken,
         });
         try {
             const response = await fetch(panel.dataset.measureUrl, {
@@ -397,12 +566,13 @@
                 body,
             });
             const payload = await response.json();
+            appendCommands(payload.commands);
             if (!response.ok) throw new Error(payload.error || "Measurement failed.");
             setError("");
             pulseTrigger();
             localSampleCount += 1;
             if (samplePosition) samplePosition.textContent = `Sample: ${localSampleCount}`;
-            displayDecimals = Number.isInteger(payload.decimals) ? payload.decimals : 3;
+            displayDecimals = payloadDecimals(payload);
             updateRange(payload);
             values.push(Number(payload.value));
             if (values.length > 10000) values = values.slice(-10000);
@@ -414,8 +584,6 @@
             updateStats();
             drawChart();
             if (!hold) setReading(payload.value);
-            unit.textContent = selectedFunctionButton()?.dataset.displayUnit
-                || payload.unit;
             fitReading();
         } catch (caught) {
             setError(caught.message);
@@ -423,7 +591,10 @@
         }
     };
     panel.querySelectorAll(".dmm-function").forEach((button) => {
-        button.addEventListener("click", () => {
+        button.addEventListener("click", async () => {
+            if (panelOperationInProgress) return;
+            panelOperationInProgress = true;
+            panelStateRevision += 1;
             selectedFunction = button.dataset.function;
             selectedRange = "auto";
             chartZoom = 1;
@@ -435,7 +606,11 @@
             panel.querySelectorAll(".dmm-function").forEach((item) => item.classList.remove("active"));
             button.classList.add("active");
             updateRangeControls();
-            trigger();
+            try {
+                await trigger();
+            } finally {
+                panelOperationInProgress = false;
+            }
         });
     });
     autoRangeButton?.addEventListener("click", () => {
@@ -461,7 +636,86 @@
     };
     rangeUpButton?.addEventListener("click", () => changeRange(1));
     rangeDownButton?.addEventListener("click", () => changeRange(-1));
-    resolutionButton?.addEventListener("click", () => {
+    resolutionChoiceButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+            const currentParts = selectedInstrumentResolutionMode.split("_");
+            const digits = button.dataset.resolutionDigits
+                || (currentParts[0] === "5.5" || currentParts[0] === "6.5"
+                    || currentParts[0] === "4.5" ? currentParts[0] : "6.5");
+            const speed = button.dataset.resolutionSpeed
+                || (currentParts[1] === "slow" ? "slow" : "fast");
+            resolutionButton.dataset.requestedResolution = `${digits}_${speed}`;
+            resolutionButton.click();
+        });
+    });
+    resolutionButton?.addEventListener("click", async () => {
+        if (readsInstrumentStatus) {
+            if (panelOperationInProgress) return;
+            panelOperationInProgress = true;
+            panelStateRevision += 1;
+            const isAgilent = panel.dataset.supportsNplcControl === "true";
+            const modes = isAgilent
+                ? agilentResolutionModes
+                : instrumentResolutionModes;
+            const selectedMode = isAgilent
+                ? selectedInstrumentResolutionMode
+                : selectedInstrumentResolution;
+            const currentIndex = modes.indexOf(selectedMode);
+            const requestedResolution = (
+                resolutionButton.dataset.requestedResolution
+                || modes[(currentIndex + 1) % modes.length]
+            );
+            delete resolutionButton.dataset.requestedResolution;
+            const body = new URLSearchParams({
+                function: selectedFunction,
+                resolution: requestedResolution,
+                panel_token: panelToken,
+            });
+            resolutionButton.disabled = true;
+            try {
+                const response = await fetch(panel.dataset.resolutionUrl, {
+                    method: "POST",
+                    headers: {
+                        "X-CSRFToken": document.querySelector(
+                            "[name=csrfmiddlewaretoken]",
+                        ).value,
+                    },
+                    body,
+                });
+                const payload = await response.json();
+                appendCommands(payload.commands);
+                if (!response.ok) {
+                    throw new Error(
+                        payload.error || "Resolution could not be changed.",
+                    );
+                }
+                selectedInstrumentResolution = payload.resolution;
+                if (payload.resolution_mode) {
+                    selectedInstrumentResolutionMode = payload.resolution_mode;
+                }
+                updateResolutionChoices();
+                if (payload.nplc !== undefined && nplcButton) {
+                    selectedInstrumentNplc = String(Number(payload.nplc));
+                    nplcButton.textContent = `NPLC ${selectedInstrumentNplc}`;
+                }
+                displayDecimals = payloadDecimals(payload, displayDecimals);
+                resolutionButton.textContent = payload.resolution_mode
+                    ? resolutionModeLabel(payload.resolution_mode)
+                    : `Resolution ${selectedInstrumentResolution.replace(".5", "½")}`;
+                const rawValue = Number(reading.dataset.rawValue);
+                if (Number.isFinite(rawValue)) {
+                    setReading(rawValue);
+                    fitReading();
+                }
+                setError("");
+            } catch (caught) {
+                setError(caught.message);
+            } finally {
+                panelOperationInProgress = false;
+                updateRangeControls();
+            }
+            return;
+        }
         const currentIndex = countModeNames.indexOf(selectedCountMode);
         selectedCountMode = countModeNames[
             (currentIndex + 1) % countModeNames.length
@@ -487,14 +741,98 @@
             trigger();
         }
     });
+    clsButton?.addEventListener("click", async () => {
+        if (panelOperationInProgress) return;
+        panelOperationInProgress = true;
+        const body = new URLSearchParams({panel_token: panelToken});
+        clsButton.disabled = true;
+        try {
+            const response = await fetch(panel.dataset.clearUrl, {
+                method: "POST",
+                headers: {
+                    "X-CSRFToken": document.querySelector(
+                        "[name=csrfmiddlewaretoken]",
+                    ).value,
+                },
+                body,
+            });
+            const payload = await response.json();
+            appendCommands(payload.commands);
+            if (!response.ok) {
+                throw new Error(payload.error || "Errors could not be cleared.");
+            }
+            setError("");
+        } catch (caught) {
+            setError(caught.message);
+        } finally {
+            panelOperationInProgress = false;
+            updateRangeControls();
+        }
+    });
+    nplcButton?.addEventListener("click", async () => {
+        if (panelOperationInProgress) return;
+        panelOperationInProgress = true;
+        panelStateRevision += 1;
+        const currentIndex = instrumentNplcModes.indexOf(selectedInstrumentNplc);
+        const requestedNplc = instrumentNplcModes[
+            (currentIndex + 1) % instrumentNplcModes.length
+        ];
+        const body = new URLSearchParams({
+            function: selectedFunction,
+            nplc: requestedNplc,
+            panel_token: panelToken,
+        });
+        nplcButton.disabled = true;
+        try {
+            const response = await fetch(panel.dataset.nplcUrl, {
+                method: "POST",
+                headers: {
+                    "X-CSRFToken": document.querySelector(
+                        "[name=csrfmiddlewaretoken]",
+                    ).value,
+                },
+                body,
+            });
+            const payload = await response.json();
+            appendCommands(payload.commands);
+            if (!response.ok) {
+                throw new Error(payload.error || "NPLC could not be changed.");
+            }
+            selectedInstrumentNplc = String(Number(payload.nplc));
+            nplcButton.textContent = `NPLC ${selectedInstrumentNplc}`;
+            selectedInstrumentResolutionMode = "";
+            updateResolutionChoices();
+            if (resolutionButton) {
+                resolutionButton.textContent = resolutionModeLabel(null);
+            }
+            setError("");
+        } catch (caught) {
+            setError(caught.message);
+        } finally {
+            panelOperationInProgress = false;
+            updateRangeControls();
+        }
+    });
     panel.querySelector(".dmm-trigger")?.addEventListener("click", trigger);
     continuousButton?.addEventListener("click", () => {
         if (timer) {
-            window.clearInterval(timer); timer = null;
+            continuousRun += 1;
+            window.clearTimeout(timer); timer = null;
             continuousButton.textContent = "Continuous";
             if (triggerMode) triggerMode.textContent = "Manual Trigger";
         } else {
-            trigger(); timer = window.setInterval(trigger, 1000);
+            const activeTrigger = instrumentStatusTrigger || trigger;
+            continuousRun += 1;
+            const run = continuousRun;
+            const repeat = async () => {
+                await activeTrigger();
+                if (!timer || run !== continuousRun) return;
+                const delay = selectedInstrumentResolutionMode === "6.5_slow"
+                    ? 3000
+                    : 1000;
+                timer = window.setTimeout(repeat, delay);
+            };
+            timer = window.setTimeout(repeat, initialContinuousDelay);
             continuousButton.textContent = "Stop";
             if (triggerMode) triggerMode.textContent = "Auto Trigger";
         }
@@ -558,7 +896,7 @@
                         || selectedFunction;
                     displayDecimals = readOnlyResolutionOverride
                         ? countModeDecimals(payload.value, selectedCountMode)
-                        : (Number.isInteger(payload.decimals) ? payload.decimals : 3);
+                        : payloadDecimals(payload);
                     taskVoltageRanges = Array.isArray(payload.voltage_ranges)
                         ? payload.voltage_ranges.map(Number)
                         : null;
@@ -573,6 +911,16 @@
                                 selectedCountMode,
                             );
                         }
+                    }
+                    if (payload.resolution && resolutionButton) {
+                        selectedInstrumentResolution = payload.resolution;
+                        selectedInstrumentResolutionMode = (
+                            payload.resolution_mode || ""
+                        );
+                        resolutionButton.textContent = payload.resolution_mode
+                            ? resolutionModeLabel(payload.resolution_mode)
+                            : `Resolution ${payload.resolution.replace(".5", "½")}`;
+                        updateResolutionChoices();
                     }
                     updateRange(payload);
                     chartStatistics = {
@@ -598,14 +946,6 @@
                     panel.querySelector(".dmm-average").textContent = format(payload.average);
                     label.textContent = displayFunctionName(payload.parameter);
                     setReading(payload.value);
-                    const parameter = payload.parameter.toUpperCase();
-                    if (payload.unit === "V") {
-                        unit.textContent = parameter.includes("AC") ? "VAC" : "VDC";
-                    } else if (payload.unit === "A") {
-                        unit.textContent = parameter.includes("AC") ? "AAC" : "ADC";
-                    } else {
-                        unit.textContent = payload.unit;
-                    }
                     fitReading();
                 }
             } catch (caught) {
@@ -615,7 +955,115 @@
         pollTaskReading();
         window.setInterval(pollTaskReading, 1000);
     } else {
-        continuousButton?.click();
+        const startPanel = async () => {
+            if (readsInstrumentStatus) {
+                instrumentStatusTrigger = async () => {
+                    if (instrumentStatusReading || panelOperationInProgress) return;
+                    instrumentStatusReading = true;
+                    const requestRevision = panelStateRevision;
+                    try {
+                        const statusUrl = new URL(
+                            panel.dataset.statusUrl,
+                            window.location.href,
+                        );
+                        statusUrl.searchParams.set("panel_token", panelToken);
+                        const response = await fetch(statusUrl);
+                        const payload = await response.json();
+                        appendCommands(payload.commands);
+                        if (!response.ok) {
+                            throw new Error(
+                                payload.error
+                                    || "Instrument status could not be loaded.",
+                            );
+                        }
+                        if (requestRevision !== panelStateRevision) return;
+                        setPanelViewer(payload.read_only === true);
+                        if (payload.pending) return;
+                        const functionButton = panel.querySelector(
+                            `.dmm-function[data-function="${payload.function}"]`,
+                        );
+                        if (
+                            !functionButton
+                            || functionButton.dataset.available !== "true"
+                        ) {
+                            throw new Error(
+                                "The active instrument function is unavailable.",
+                            );
+                        }
+                        if (selectedFunction !== payload.function) values = [];
+                        selectedFunction = payload.function;
+                        selectedRange = (
+                            payload.autorange
+                            || payload.range_value === null
+                            || payload.range_value === undefined
+                        )
+                            ? "auto"
+                            : String(payload.range_value);
+                        displayDecimals = payloadDecimals(payload);
+                        if (payload.resolution) {
+                            selectedInstrumentResolution = payload.resolution;
+                            selectedInstrumentResolutionMode = (
+                                payload.resolution_mode || ""
+                            );
+                            resolutionButton.textContent = payload.resolution_mode
+                                ? resolutionModeLabel(payload.resolution_mode)
+                                : `Resolution ${payload.resolution.replace(".5", "½")}`;
+                            updateResolutionChoices();
+                        }
+                        if (payload.nplc !== undefined && nplcButton) {
+                            selectedInstrumentNplc = String(Number(payload.nplc));
+                            nplcButton.textContent = `NPLC ${selectedInstrumentNplc}`;
+                        }
+                        panel.querySelectorAll(".dmm-function").forEach(
+                            (button) => button.classList.toggle(
+                                "active",
+                                button === functionButton,
+                            ),
+                        );
+                        label.textContent = functionButton.dataset.displayLabel;
+                        unit.textContent = functionButton.dataset.displayUnit
+                            || payload.unit;
+                        values.push(Number(payload.value));
+                        if (values.length > 10000) values = values.slice(-10000);
+                        localSampleCount += 1;
+                        if (samplePosition) {
+                            samplePosition.textContent = (
+                                `Sample: ${localSampleCount}`
+                            );
+                        }
+                        updateRange(payload);
+                        setReading(payload.value);
+                        updateStats();
+                        drawChart();
+                        pulseTrigger();
+                        setError("");
+                        fitReading();
+                    } catch (caught) {
+                        setError(caught.message);
+                        if (timer) continuousButton?.click();
+                    } finally {
+                        instrumentStatusReading = false;
+                    }
+                };
+            }
+            continuousButton?.click();
+        };
+        startPanel();
     }
+    window.addEventListener("pagehide", () => {
+        continuousRun += 1;
+        if (timer) {
+            window.clearTimeout(timer);
+            timer = null;
+        }
+        if (!readsInstrumentStatus || panelViewer) return;
+        const body = new FormData();
+        body.append("panel_token", panelToken);
+        body.append(
+            "csrfmiddlewaretoken",
+            document.querySelector("[name=csrfmiddlewaretoken]").value,
+        );
+        navigator.sendBeacon(panel.dataset.releaseUrl, body);
+    });
     window.requestAnimationFrame(fitReading);
 })();
